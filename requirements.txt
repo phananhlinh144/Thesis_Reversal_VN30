@@ -1,9 +1,9 @@
 streamlit
-tensorflow
 pandas
 numpy
-pandas_ta
-vnstock
+tensorflow
 joblib
-scikit-learn
+pandas_ta
 plotly
+vnstock
+scikit-learn\
