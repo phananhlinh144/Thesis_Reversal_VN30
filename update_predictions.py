@@ -1,265 +1,179 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
 import tensorflow as tf
 import joblib
 import pandas_ta as ta
 import time
+import warnings
+import os
 from datetime import datetime, timedelta
-from vnstock import Vnstock
+from vnstock import * # Sử dụng vnstock phiên bản cũ
 
-# --- CẤU HÌNH TRANG WEB ---
-st.set_page_config(
-    page_title="VN30 AI Trading Bot",
-    page_icon="📈",
-    layout="wide"
-)
+# Tắt các cảnh báo để log sạch sẽ
+warnings.filterwarnings('ignore')
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# --- 1. LOAD MODEL & CACHE (Chỉ load 1 lần để web chạy nhanh) ---
-@st.cache_resource
-def load_ai_models():
-    # Lưu ý: Khi up lên GitHub, hãy để file model cùng thư mục với app.py
-    # Hoặc sửa đường dẫn này cho đúng với cấu trúc folder trên GitHub của bạn
-    try:
-        m_win50 = tf.keras.models.load_model('Full_K10_Win50_Hybrid.keras')
-        m_win10 = tf.keras.models.load_model('Baseline_K10_Win10_Hybrid.keras')
-        scaler_data = joblib.load('smart_scaler_system.pkl')
-        return m_win50, m_win10, scaler_data
-    except Exception as e:
-        st.error(f"Lỗi load model: {e}")
-        return None, None, None
+# --- 1. CẤU HÌNH ĐƯỜNG DẪN ---
+MODEL_WIN50_PATH = 'Full_K10_Win50_Hybrid.keras'
+MODEL_WIN10_PATH = 'Baseline_K10_Win10_Hybrid.keras'
+SCALER_PATH      = 'smart_scaler_system.pkl'
+HISTORY_CSV_PATH = 'vn30_data_raw.csv' 
 
-model_win50, model_win10, scaler_bundle = load_ai_models()
-
-if scaler_bundle:
-    global_scaler = scaler_bundle['global_scaler']
-    local_scalers = scaler_bundle['local_scalers_dict']
-
-# --- DANH SÁCH VN30 ---
-VN30_LIST = ['ACB', 'BCM', 'BID', 'CTG', 'DGC', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG',
-             'LPB', 'MSN', 'MBB', 'MWG', 'PLX', 'SAB', 'SHB', 'SSB', 'SSI', 'STB',
-             'TCB', 'TPB', 'VCB', 'VIC', 'VHM', 'VIB', 'VJC', 'VNM', 'VPB', 'VRE']
-
-FINAL_FEATURES = [
+FEATS_FULL = [
     'RC_1', 'RC_2', 'RC_3', 'RC_5', 'RC_8', 'RC_13', 'RC_21', 'RC_34', 'RC_55',
-    'Grad_5', 'Grad_10', 'Grad_20', 'RSI', 'BB_PctB', 'MACD_Hist', 'Vol_Ratio', 'ATR_Rel'
+    'Grad_5', 'Grad_10', 'Grad_20', 'RSI', 'BB_PctB', 'MACD_Hist', 'Vol_Ratio', 'ATR_Rel', 'Dist_Prev_K10'
 ]
-FEATS_FULL = FINAL_FEATURES + ['Dist_Prev_K10']
 
-# --- 2. HÀM XỬ LÝ DỮ LIỆU (Giữ nguyên logic của bạn) ---
-def get_data_efficient(symbol):
+# --- 2. LOAD MODELS ---
+print("⏳ Đang khởi tạo hệ thống AI...")
+try:
+    model_win50 = tf.keras.models.load_model(MODEL_WIN50_PATH)
+    model_win10 = tf.keras.models.load_model(MODEL_WIN10_PATH)
+    scaler_bundle = joblib.load(SCALER_PATH)
+    local_scalers = scaler_bundle['local_scalers_dict']
+    global_scaler = scaler_bundle['global_scaler']
+    print("✅ Load Model thành công.")
+except Exception as e:
+    print(f"❌ Lỗi Load Model: {e}")
+    exit()
+
+# --- 3. HÀM XỬ LÝ DỮ LIỆU ---
+
+def get_hybrid_data(symbol):
+    """Đọc dữ liệu từ file csv (đến 10/1) và nối thêm từ VCI bằng vnstock cũ"""
     try:
-        stock = Vnstock().stock(symbol=symbol, source='VCI') 
-        df = stock.quote.history(start=(datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d'), 
-                                 end=datetime.now().strftime('%Y-%m-%d'))
+        # 1. Đọc dữ liệu lịch sử từ file csv (Dữ liệu bạn đã gửi)
+        full_hist = pd.read_csv(HISTORY_CSV_PATH)
+        full_hist['Date'] = pd.to_datetime(full_hist['Date'])
+        df_old = full_hist[full_hist['Symbol'] == symbol].sort_values('Date')
         
-        if df is None or df.empty: return pd.DataFrame()
-
-        df = df.rename(columns={'time': 'Date', 'open': 'Open', 'high': 'High', 
-                                'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
-        cols_to_numeric = ['Open', 'High', 'Low', 'Close', 'Volume']
-        for c in cols_to_numeric: df[c] = pd.to_numeric(df[c], errors='coerce')
+        # 2. Lấy dữ liệu mới từ nguồn VCI (vnstock cũ dùng hàm stock_historical_data)
+        start_date = "2026-01-11"
+        end_date = datetime.now().strftime('%Y-%m-%d')
         
-        df['Date'] = pd.to_datetime(df['Date'])
-        df = df.sort_values('Date').reset_index(drop=True)
-
-        # Real-time update logic
         try:
-            live_df = stock.quote.now()
-            if not live_df.empty:
-                current_price = float(live_df['close'].iloc[0])
-                current_vol   = float(live_df['volume'].iloc[0])
-                current_high  = float(live_df['high'].iloc[0])
-                current_low   = float(live_df['low'].iloc[0])
-                
-                if current_high == 0: current_high = current_price
-                if current_low == 0: current_low = current_price
-
-                today_date = pd.Timestamp(datetime.now().date())
-                last_hist_date = df.iloc[-1]['Date']
-
-                if last_hist_date.date() == today_date.date():
-                    last_idx = df.index[-1]
-                    df.at[last_idx, 'Close'] = current_price
-                    df.at[last_idx, 'High']  = max(df.at[last_idx, 'High'], current_high)
-                    df.at[last_idx, 'Low']   = min(df.at[last_idx, 'Low'], current_low)
-                    df.at[last_idx, 'Volume'] = current_vol
-                else:
-                    new_row = {
-                        'Date': today_date, 'Open': current_price, 'High': current_high,
-                        'Low': current_low, 'Close': current_price, 'Volume': current_vol
-                    }
-                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            # Lưu ý: vnstock cũ lấy dữ liệu theo định dạng 'YYYY-MM-DD'
+            df_new = stock_historical_data(symbol=symbol, 
+                                           start_date=start_date, 
+                                           end_date=end_date, 
+                                           resolution='1D', 
+                                           type='stock', 
+                                           source='VCI')
+            
+            if df_new is not None and not df_new.empty:
+                # Chuẩn hóa tên cột vnstock cũ về dạng chung
+                df_new = df_new.rename(columns={'time':'Date','open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'})
+                df_new['Date'] = pd.to_datetime(df_new['Date'])
+                df_final = pd.concat([df_old, df_new], ignore_index=True)
+            else:
+                df_final = df_old
         except:
-            pass
-        return df
-    except:
+            df_final = df_old
+
+        df_final = df_final.drop_duplicates(subset=['Date']).sort_values('Date').reset_index(drop=True)
+        
+        # Ép kiểu dữ liệu số để tránh lỗi tính toán indicators
+        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+            df_final[col] = pd.to_numeric(df_final[col], errors='coerce')
+            
+        return df_final
+    except Exception as e:
+        print(f"⚠️ Lỗi xử lý {symbol}: {e}")
         return pd.DataFrame()
 
-def compute_features_inference(df):
+def compute_features(df):
+    if len(df) < 60: return pd.DataFrame()
     g = df.copy()
-    if len(g) < 60: return pd.DataFrame()
     
+    # Tính toán Returns Change
     for n in [1, 2, 3, 5, 8, 13, 21, 34, 55]: 
         g[f'RC_{n}'] = g['Close'].pct_change(n) * 100
-    
-    for n in [5, 10, 20]:
-        ma = g['Close'].rolling(window=n).mean()
-        g[f'Grad_{n}'] = np.gradient(ma.fillna(method='bfill'))
         
+    # Tính toán Gradient của các đường MA
+    for n in [5, 10, 20]:
+        ma = g['Close'].rolling(window=n).mean().fillna(method='bfill')
+        g[f'Grad_{n}'] = np.gradient(ma)
+    
+    # Chỉ báo kỹ thuật từ pandas_ta
     g['Vol_Ratio'] = g['Volume'] / ta.sma(g['Volume'], length=20)
     g['RSI'] = ta.rsi(g['Close'], length=14)
-    g['BB_PctB'] = ta.bbands(g['Close'], length=20, std=2).iloc[:, 4]
+    
+    bb = ta.bbands(g['Close'], length=20, std=2)
+    g['BB_PctB'] = bb.iloc[:, 4] # Cột %B
+    
     g['MACD_Hist'] = ta.macd(g['Close']).iloc[:, 1]
     g['ATR_Rel'] = ta.atr(g['High'], g['Low'], g['Close'], length=14) / g['Close']
     
-    rmin = g['Close'].rolling(20).min()
-    rmax = g['Close'].rolling(20).max()
+    # Khoảng cách so với nến K10 trước đó
     ma20 = g['Close'].rolling(20).mean()
-    
     g['Dist_Prev_K10'] = 0.0
-    mask_up = g['Close'] >= ma20
-    mask_down = g['Close'] < ma20
-    g.loc[mask_up, 'Dist_Prev_K10'] = (g['Close'] - rmin) / rmin
-    g.loc[mask_down, 'Dist_Prev_K10'] = (g['Close'] - rmax) / rmax
+    g.loc[g['Close'] >= ma20, 'Dist_Prev_K10'] = (g['Close'] - g['Close'].rolling(20).min()) / g['Close'].rolling(20).min()
+    g.loc[g['Close'] < ma20, 'Dist_Prev_K10'] = (g['Close'] - g['Close'].rolling(20).max()) / g['Close'].rolling(20).max()
     
     return g.dropna().reset_index(drop=True)
 
-def process_prediction(df_calc, symbol, target_idx=-1):
-    if len(df_calc) < 55: return None
-    
-    if target_idx == -1:
-        d50 = df_calc.iloc[-50:].copy()
-        d10 = df_calc.iloc[-10:].copy()
-        current_date = df_calc.iloc[-1]['Date']
-        current_price = df_calc.iloc[-1]['Close']
-    else:
-        end_pos = target_idx + 1
-        d50 = df_calc.iloc[end_pos-50 : end_pos].copy()
-        d10 = df_calc.iloc[end_pos-10 : end_pos].copy()
-        current_date = df_calc.iloc[target_idx]['Date']
-        current_price = df_calc.iloc[target_idx]['Close']
+def predict_at_index(df_feat, symbol, idx=-1):
+    actual_idx = len(df_feat) + idx if idx < 0 else idx
+    if actual_idx < 50: return None
 
-    if len(d50) < 50 or len(d10) < 10: return None
+    # Slice cửa sổ 50 phiên và 10 phiên
+    d50 = df_feat.iloc[actual_idx-49 : actual_idx+1]
+    d10 = df_feat.iloc[actual_idx-9 : actual_idx+1]
 
+    # Scaling dữ liệu
     scaler = local_scalers.get(symbol, global_scaler)
-    try:
-        s50 = scaler.transform(d50[FEATS_FULL].values)
-        s10 = scaler.transform(d10[FEATS_FULL].values)
-    except:
-        s50 = global_scaler.transform(d50[FEATS_FULL].values)
-        s10 = global_scaler.transform(d10[FEATS_FULL].values)
+    s50 = scaler.transform(d50[FEATS_FULL].values)
+    s10 = scaler.transform(d10[FEATS_FULL].values)
 
-    p50_raw = model_win50.predict(np.expand_dims(s50, axis=0), verbose=0)[0]
-    p10_raw = model_win10.predict(np.expand_dims(s10[:, :17], axis=0), verbose=0)[0]
+    # Dự báo từ 2 model Hybrid
+    p50_raw = model_win50.predict(np.expand_dims(s50, 0), verbose=0)[0]
+    p10_raw = model_win10.predict(np.expand_dims(s10[:, :17], 0), verbose=0)[0]
 
-    cls50, cls10 = np.argmax(p50_raw), np.argmax(p10_raw)
-    avg_prob = (p50_raw[cls50] + p10_raw[cls10]) / 2
-
+    c50, c10 = np.argmax(p50_raw), np.argmax(p10_raw)
+    
     signal = "THEO DÕI"
-    if cls50 == 0 and cls10 == 0: signal = "MUA"
-    elif cls50 == 2 and cls10 == 2: signal = "BÁN"
+    if c50 == 0 and c10 == 0: signal = "MUA"
+    elif c50 == 2 and c10 == 2: signal = "BÁN"
+    
+    labels = {0: 'Tăng', 1: 'Ngang', 2: 'Giảm'}
 
     return {
-        'Symbol': symbol,
-        'Date': current_date,
-        'Close': current_price,
-        'Prob': avg_prob,
-        'Signal': signal
+        "Mã": symbol,
+        "Ngày": df_feat.iloc[actual_idx]['Date'].strftime('%Y-%m-%d'),
+        "Giá": int(df_feat.iloc[actual_idx]['Close']),
+        "Win50": f"{labels[c50]} ({p50_raw[c50]:.0%})",
+        "Win10": f"{labels[c10]} ({p10_raw[c10]:.0%})",
+        "ENSEMBLE": signal
     }
 
-# --- 3. GIAO DIỆN WEB ---
-st.title("🤖 VN30 AI Trading Dashboard")
-st.markdown(f"**Cập nhật lúc:** {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
+# --- 4. CHƯƠNG TRÌNH CHÍNH ---
 
-# Sidebar
-st.sidebar.header("Bộ điều khiển")
-mode = st.sidebar.radio("Chế độ", ["Quét toàn thị trường", "Soi mã cụ thể"])
-
-if mode == "Quét toàn thị trường":
-    if st.sidebar.button("🚀 BẮT ĐẦU QUÉT"):
-        st.write("### ⏳ Đang quét tín hiệu Real-time...")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+if __name__ == "__main__":
+    vn30 = ['ACB', 'BCM', 'BID', 'CTG', 'DGC', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 
+            'LPB', 'MSN', 'MBB', 'MWG', 'PLX', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 
+            'TCB', 'TPB', 'VCB', 'VIC', 'VHM', 'VIB', 'VJC', 'VNM', 'VPB', 'VRE']
+    
+    final_output = []
+    LOOKBACK = 20 # Số phiên lịch sử để hiển thị trên Web
+    
+    print(f"🚀 Bắt đầu quét dữ liệu Hybrid (vnstock cũ)...")
+    for i, sym in enumerate(vn30):
+        print(f"\r⏳ [{i+1}/30] Đang xử lý: {sym:<5}", end="")
+        df = get_hybrid_data(sym)
+        if df.empty: continue
         
-        results = []
-        for i, sym in enumerate(VN30_LIST):
-            status_text.text(f"Đang phân tích: {sym} ({i+1}/{len(VN30_LIST)})")
-            
-            df = get_data_efficient(sym)
-            if not df.empty:
-                df_c = compute_features_inference(df)
-                res = process_prediction(df_c, sym)
-                if res: results.append(res)
-            
-            progress_bar.progress((i + 1) / len(VN30_LIST))
+        df_feat = compute_features(df)
+        if df_feat.empty: continue
         
-        status_text.text("✅ Hoàn tất!")
-        progress_bar.empty()
-        
-        # Phân loại
-        df_res = pd.DataFrame(results)
-        if not df_res.empty:
-            df_mua = df_res[df_res['Signal'] == 'MUA'].sort_values('Prob', ascending=False)
-            df_ban = df_res[df_res['Signal'] == 'BÁN'].sort_values('Prob', ascending=False)
-            df_theo_doi = df_res[df_res['Signal'] == 'THEO DÕI'].sort_values('Prob', ascending=False).head(10)
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.success("### 🟢 KHUYẾN NGHỊ MUA")
-                if not df_mua.empty:
-                    st.dataframe(df_mua[['Symbol', 'Close', 'Prob']].style.format({"Close": "{:,.0f}", "Prob": "{:.1%}"}))
-                else:
-                    st.write("Chưa có tín hiệu Mua.")
-
-            with col2:
-                st.error("### 🔴 KHUYẾN NGHỊ BÁN")
-                if not df_ban.empty:
-                    st.dataframe(df_ban[['Symbol', 'Close', 'Prob']].style.format({"Close": "{:,.0f}", "Prob": "{:.1%}"}))
-                else:
-                    st.write("Chưa có tín hiệu Bán.")
+        # Lưu kết quả 20 phiên gần nhất
+        for j in range(-LOOKBACK, 0):
+            try:
+                res = predict_at_index(df_feat, sym, idx=j)
+                if res: final_output.append(res)
+            except: continue
             
-            st.warning("### 🟡 TOP THEO DÕI (Prob cao nhất)")
-            st.dataframe(df_theo_doi[['Symbol', 'Close', 'Prob']].style.format({"Close": "{:,.0f}", "Prob": "{:.1%}"}))
-
-elif mode == "Soi mã cụ thể":
-    selected_sym = st.sidebar.selectbox("Chọn mã cổ phiếu", VN30_LIST)
-    if st.button(f"🔍 Phân tích {selected_sym}"):
-        with st.spinner(f"Đang tải dữ liệu {selected_sym}..."):
-            df = get_data_efficient(selected_sym)
-            if not df.empty:
-                df_c = compute_features_inference(df)
-                
-                # Hiện giá hiện tại
-                curr_price = df_c.iloc[-1]['Close']
-                st.metric(label=f"Giá {selected_sym}", value=f"{curr_price:,.0f} VND")
-                
-                # Vẽ biểu đồ giá nhỏ
-                st.line_chart(df_c.set_index('Date')['Close'].tail(50))
-
-                # Dự báo 5 phiên gần nhất
-                st.write("### 📅 Lịch sử tín hiệu AI (5 phiên gần nhất)")
-                hist_res = []
-                for i in range(4, -1, -1):
-                    idx = len(df_c) - 1 - i
-                    if idx < 0: continue
-                    r = process_prediction(df_c, selected_sym, target_idx=idx)
-                    if r:
-                        hist_res.append({
-                            'Ngày': r['Date'].strftime('%d/%m'),
-                            'Giá': r['Close'],
-                            'Tín hiệu AI': r['Signal'],
-                            'Độ tin cậy': r['Prob']
-                        })
-                
-                df_hist = pd.DataFrame(hist_res)
-                
-                # Tô màu bảng kết quả
-                def color_signal(val):
-                    color = 'green' if val == 'MUA' else 'red' if val == 'BÁN' else 'orange'
-                    return f'color: {color}; font-weight: bold'
-                
-                st.dataframe(df_hist.style.applymap(color_signal, subset=['Tín hiệu AI'])
-                             .format({"Giá": "{:,.0f}", "Độ tin cậy": "{:.1%}"}))
-            else:
-                st.error("Không lấy được dữ liệu.")
+        time.sleep(1.7) # Nghỉ để không bị firewall chặn IP
+        
+    if final_output:
+        pd.DataFrame(final_output).to_csv('vn30_signals.csv', index=False, encoding='utf-8-sig')
+        print(f"\n✅ Hệ thống đã cập nhật vn30_signals.csv thành công!")
