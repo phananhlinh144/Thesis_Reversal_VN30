@@ -1,11 +1,9 @@
 streamlit
 pandas
-numpy
-tensorflow
+numpy<2.0
+tensorflow-cpu
 joblib
-pandas_ta
+https://github.com/twopirllc/pandas-ta/archive/refs/heads/development.zip
 plotly
-vnstock
+vnstock==0.2.1
 scikit-learn
-gdown
-
