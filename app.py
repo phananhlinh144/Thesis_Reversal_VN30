@@ -15,10 +15,10 @@ from vnstock import Vnstock
 # ==============================================================================
 st.set_page_config(page_title="VN30 AI Forecast", layout="wide")
 
-# Đường dẫn model (Đảm bảo folder KLTN nằm cùng cấp với app.py trên Github)
-MODEL_WIN50_PATH = 'KLTN/models_output/Full_K10_Win50_Hybrid.keras'
-MODEL_WIN10_PATH = 'KLTN/models_output/Baseline_K10_Win10_Hybrid.keras'
-SCALER_PATH      = 'KLTN/models_output/smart_scaler_system.pkl'
+# Đường dẫn model
+MODEL_WIN50_PATH = 'models_scaling/Full_K10_Win50_Hybrid.keras'
+MODEL_WIN10_PATH = 'models_scaling/Baseline_K10_Win10_Hybrid.keras'
+SCALER_PATH      = 'models_scaling/smart_scaler_system.pkl'
 CSV_PATH         = 'vn30_data_raw.csv'
 
 FINAL_FEATURES = [
@@ -363,3 +363,4 @@ with tab3:
                 
         st.write(f"### Chi tiết tín hiệu {sym_tab3} ({days_back} phiên gần nhất)")
         st.dataframe(pd.DataFrame(table_data))
+
