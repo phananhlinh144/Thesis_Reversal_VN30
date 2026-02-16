@@ -13,7 +13,7 @@ import gdown
 import os
 
 # --- 1. CẤU HÌNH & LOAD MODEL ---
-st.set_page_config(page_title="VN30 AI PRO - Auto Scan", layout="wide")
+st.set_page_config(page_title="VN30 AI PRO - VCI Optimized", layout="wide")
 
 @st.cache_resource
 def load_ai_assets():
@@ -26,11 +26,11 @@ m50, m10, bundle = load_ai_assets()
 vn30_symbols = ['ACB', 'BCM', 'BID', 'CTG', 'DGC', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'LPB', 'MSN', 'MBB', 'MWG', 'PLX', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VIC', 'VHM', 'VIB', 'VJC', 'VNM', 'VPB', 'VRE']
 FEATS_FULL = ['RC_1', 'RC_2', 'RC_3', 'RC_5', 'RC_8', 'RC_13', 'RC_21', 'RC_34', 'RC_55', 'Grad_5', 'Grad_10', 'Grad_20', 'RSI', 'BB_PctB', 'MACD_Hist', 'Vol_Ratio', 'ATR_Rel', 'Dist_Prev_K10']
 
-# --- 2. HÀM XỬ LÝ DỮ LIỆU ---
+# --- 2. HÀM XỬ LÝ DỮ LIỆU (Sử dụng VCI) ---
 @st.cache_data(ttl=3600)
 def get_integrated_data(symbol):
     try:
-        drive_url = 'https://drive.google.com/uc?id=1xG6J9fBEF_Z4KY3x_frUwnhVTSA6HG2r'
+        drive_url = 'https://drive.google.com/uc?id=1xG6J9fBEF_Z4KY3_frUwnhVTSA6HG2r'
         output = 'historical_data.csv'
         if not os.path.exists(output):
             gdown.download(drive_url, output, quiet=True)
@@ -41,7 +41,7 @@ def get_integrated_data(symbol):
         df_hist['Date'] = pd.to_datetime(df_hist['Date'])
         last_date_drive = df_hist['Date'].max()
         
-        # Sử dụng VCI để ổn định hơn
+        # Nguồn VCI ổn định hơn cho data realtime
         stock = Vnstock().stock(symbol=symbol, source='VCI')
         df_new = stock.quote.history(start=last_date_drive.strftime('%Y-%m-%d'), end=datetime.now().strftime('%Y-%m-%d'))
         
@@ -54,6 +54,7 @@ def get_integrated_data(symbol):
         return df_final.sort_values('Date').reset_index(drop=True)
     except:
         try:
+            # Dự phòng nếu Drive lỗi, lấy thẳng 300 phiên từ VCI
             df = Vnstock().stock(symbol=symbol, source='VCI').quote.history(start=(datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d'), end=datetime.now().strftime('%Y-%m-%d'))
             df = df.rename(columns={'time':'Date','open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'})
             df['Date'] = pd.to_datetime(df['Date'])
@@ -98,12 +99,17 @@ def predict_logic(df_c, symbol, target_idx=-1):
     elif c50 == 2 and c10 == 2: ensemble = "BÁN"
     return {'win50': f"{labels[c50]} {p50[c50]:.0%}", 'win10': f"{labels[c10]} {p10[c10]:.0%}", 'ENSEMBLE': ensemble, 'c50': c50}
 
-# --- 3. AUTO-SCAN ---
+# --- 3. AUTO-SCAN (Có Rate Limiting cho VCI) ---
 if 'all_results' not in st.session_state:
-    with st.status("🚀 Đang khởi tạo dữ liệu VN30...", expanded=True) as status:
+    with st.status("🚀 Đang khởi tạo dữ liệu VN30 (VCI Source)...", expanded=True) as status:
         results = []
-        for sym in vn30_symbols:
-            st.write(f"⏳ Đang phân tích: {sym}...")
+        for i, sym in enumerate(vn30_symbols):
+            # Cứ mỗi 10 mã thì nghỉ 2 giây
+            if i > 0 and i % 10 == 0:
+                st.write(f"😴 Nghỉ giải lao 2s cho VCI đỡ mệt...")
+                time.sleep(2)
+            
+            st.write(f"⏳ Đang phân tích: {sym} ({i+1}/30)...")
             df_sym = get_integrated_data(sym)
             df_c_sym = compute_features(df_sym)
             if not df_c_sym.empty:
@@ -113,17 +119,18 @@ if 'all_results' not in st.session_state:
                         "Mã": sym, "Giá HT": f"{df_c_sym['Close'].iloc[-1]:,.0f}",
                         "win50": r['win50'], "win10": r['win10'], "ENSEMBLE": r['ENSEMBLE']
                     })
-        # Khởi tạo DataFrame có sẵn cột để tránh KeyError nếu list rỗng
+        
         st.session_state.all_results = pd.DataFrame(results, columns=["Mã", "Giá HT", "win50", "win10", "ENSEMBLE"])
-        status.update(label="✅ Đã quét xong!", state="complete", expanded=False)
+        status.update(label="✅ Đã quét xong VN30!", state="complete", expanded=False)
 
-# --- 4. GIAO DIỆN ---
+# --- 4. GIAO DIỆN TABS ---
 t1, t2, t3 = st.tabs(["🚀 Tổng hợp VN30", "📊 Đồ thị AI", "🔍 Chi tiết 20 phiên"])
 
+# TAB 1: TỔNG HỢP
 with t1:
     df_res = st.session_state.all_results
     if df_res.empty:
-        st.warning("⚠️ Không có dữ liệu. Vui lòng kiểm tra kết nối internet và nhấn Làm mới.")
+        st.warning("⚠️ Không lấy được dữ liệu. Kiểm tra nguồn VCI hoặc nhấn Làm mới.")
     else:
         c1, c2, c3 = st.columns(3)
         with c1: 
@@ -136,22 +143,24 @@ with t1:
             st.warning("🟡 THEO DÕI")
             st.dataframe(df_res[~df_res['ENSEMBLE'].isin(["MUA", "BÁN"])], use_container_width=True, hide_index=True)
     
-    if st.button("🔄 Làm mới dữ liệu"):
+    if st.button("🔄 Làm mới dữ liệu (Quét lại toàn bộ)"):
         del st.session_state.all_results
         st.rerun()
 
-# --- TAB 2 & 3 Giữ nguyên logic đã fix 'ENSEMBLE' ---
+# TAB 2: ĐỒ THỊ
 with t2:
     sel_sym = st.selectbox("Chọn mã soi kỹ", vn30_symbols)
-    df = get_integrated_data(sel_sym)
-    df_c = compute_features(df)
-    if not df_c.empty:
-        chart_df = df_c.tail(100).copy()
-        signals = [predict_logic(df_c, sel_sym, target_idx=i) for i in range(len(df_c)-50, len(df_c))]
+    df_plot = get_integrated_data(sel_sym)
+    df_c_plot = compute_features(df_plot)
+    if not df_c_plot.empty:
+        chart_df = df_c_plot.tail(100).copy()
+        # Dự báo cho 50 nến cuối để vẽ marker
+        signals = [predict_logic(df_c_plot, sel_sym, target_idx=i) for i in range(len(df_c_plot)-50, len(df_c_plot))]
+        
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3], specs=[[{"secondary_y": True}], [{"secondary_y": False}]])
         fig.add_trace(go.Candlestick(x=chart_df['Date'], open=chart_df['Open'], high=chart_df['High'], low=chart_df['Low'], close=chart_df['Close'], name="Giá"), row=1, col=1)
         
-        # Marker dự báo
+        # Thêm các Marker tín hiệu
         sig_dates, sig_prices = chart_df['Date'].tail(50), chart_df['Close'].tail(50)
         for i, s in enumerate(signals):
             if s and s['ENSEMBLE'] == "MUA":
@@ -162,15 +171,15 @@ with t2:
         fig.update_layout(height=600, template='plotly_dark', xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
+# TAB 3: LỊCH SỬ
 with t3:
-    sel_sym_hist = st.selectbox("Mã xem lịch sử", vn30_symbols, key="h_box")
-    df_h = get_integrated_data(sel_sym_hist)
+    sel_sym_h = st.selectbox("Mã xem lịch sử", vn30_symbols, key="h_box")
+    df_h = get_integrated_data(sel_sym_h)
     df_hc = compute_features(df_h)
     if not df_hc.empty:
-        hist = []
+        hist_data = []
         for i in range(len(df_hc)-20, len(df_hc)):
-            r = predict_logic(df_hc, sel_sym_hist, target_idx=i)
+            r = predict_logic(df_hc, sel_sym_h, target_idx=i)
             if r:
-                hist.append({"Ngày": df_hc['Date'].iloc[i].strftime('%d/%m/%Y'), "Giá": f"{df_hc['Close'].iloc[i]:,.0f}", "win50": r['win50'], "win10": r['win10'], "ENSEMBLE": r['ENSEMBLE']})
-        st.table(pd.DataFrame(hist[::-1]))
-
+                hist_data.append({"Ngày": df_hc['Date'].iloc[i].strftime('%d/%m/%Y'), "Giá": f"{df_hc['Close'].iloc[i]:,.0f}", "win50": r['win50'], "win10": r['win10'], "ENSEMBLE": r['ENSEMBLE']})
+        st.table(pd.DataFrame(hist_data[::-1]))
