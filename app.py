@@ -41,8 +41,8 @@ def get_integrated_data(symbol):
         df_hist['Date'] = pd.to_datetime(df_hist['Date'])
         last_date_drive = df_hist['Date'].max()
         
-        # Sử dụng TCBS để ổn định hơn
-        stock = Vnstock().stock(symbol=symbol, source='TCBS')
+        # Sử dụng VCI để ổn định hơn
+        stock = Vnstock().stock(symbol=symbol, source='VCI')
         df_new = stock.quote.history(start=last_date_drive.strftime('%Y-%m-%d'), end=datetime.now().strftime('%Y-%m-%d'))
         
         if df_new is not None and not df_new.empty:
@@ -54,7 +54,7 @@ def get_integrated_data(symbol):
         return df_final.sort_values('Date').reset_index(drop=True)
     except:
         try:
-            df = Vnstock().stock(symbol=symbol, source='TCBS').quote.history(start=(datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d'), end=datetime.now().strftime('%Y-%m-%d'))
+            df = Vnstock().stock(symbol=symbol, source='VCI').quote.history(start=(datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d'), end=datetime.now().strftime('%Y-%m-%d'))
             df = df.rename(columns={'time':'Date','open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'})
             df['Date'] = pd.to_datetime(df['Date'])
             return df.sort_values('Date').reset_index(drop=True)
@@ -173,3 +173,4 @@ with t3:
             if r:
                 hist.append({"Ngày": df_hc['Date'].iloc[i].strftime('%d/%m/%Y'), "Giá": f"{df_hc['Close'].iloc[i]:,.0f}", "win50": r['win50'], "win10": r['win10'], "ENSEMBLE": r['ENSEMBLE']})
         st.table(pd.DataFrame(hist[::-1]))
+
