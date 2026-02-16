@@ -1,17 +1,14 @@
-name: Auto AI Predict
+name: Auto Update Data CSV
 
 on:
   schedule:
-    - cron: '15 2 * * 1-5'  # 9:15 AM VN
-    - cron: '45 4 * * 1-5'  # 11:45 AM VN
-    - cron: '45 7 * * 1-5'  # 14:45 PM VN
-    - cron: '15 8 * * 1-5'  # 15:15 PM VN
-  workflow_dispatch: 
+    # Chạy lúc 15:45 chiều VN (tương ứng 8:45 AM UTC) mỗi ngày từ thứ 2 đến thứ 6
+    - cron: '45 8 * * 1-5'
+  workflow_dispatch: # Vẫn giữ cái này để khi nào thích thì bấm tay chạy thử
 
 jobs:
-  run_ai:
+  run_update:
     runs-on: ubuntu-latest
-    # QUAN TRỌNG: Cấp quyền ghi vào Repo
     permissions:
       contents: write
       
@@ -26,22 +23,23 @@ jobs:
 
       - name: Install libraries
         run: |
-          pip install pandas numpy==1.26.4 tensorflow-cpu vnstock==0.2.1 joblib scikit-learn beautifulsoup4 lxml requests
+          pip install pandas vnstock beautifulsoup4 lxml requests
 
-      - name: Run Prediction Script
-        run: python update_predictions.py
+      - name: Run Update Script
+        # Đổi tên file ở đây cho khớp với file python lấy data
+        run: python update_data.py
 
       - name: Save and Push CSV
         run: |
-          git config --global user.name "AI-Bot"
+          git config --global user.name "Data-Bot"
           git config --global user.email "bot@github.com"
           
-          # Kiểm tra nếu file tồn tại thì mới add và commit
-          if [ -f "vn30_signals.csv" ]; then
-            git add vn30_signals.csv
-            git commit -m "Update signals $(date)" || echo "No changes to commit"
+          # Bây giờ mình lưu file raw vì AI sẽ chạy ở app.py
+          if [ -f "vn30_data_raw.csv" ]; then
+            git add vn30_data_raw.csv
+            git commit -m "Auto-update VN30 data $(date)" || echo "No changes to commit"
             git push
           else
-            echo "❌ Lỗi: Không tìm thấy file vn30_signals.csv để lưu!"
+            echo "❌ Lỗi: Không tìm thấy file vn30_data_raw.csv!"
             exit 1
           fi
