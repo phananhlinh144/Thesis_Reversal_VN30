@@ -1,0 +1,37 @@
+name: Auto AI Predict
+
+on:
+  schedule:
+    # Chạy vào các mốc: 9:15, 11:45, 14:45, 15:30 (Giờ VN)
+    - cron: '15 2 * * 1-5'  # 9:15 AM VN
+    - cron: '45 4 * * 1-5'  # 11:45 AM VN
+    - cron: '45 7 * * 1-5'  # 14:45 PM VN
+    - cron: '30 8 * * 1-5'  # 15:30 PM VN
+  workflow_dispatch: # Vẫn giữ nút này để bạn bấm chạy tay bất cứ lúc nào
+
+jobs:
+  run_ai:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install libraries
+        run: |
+          pip install pandas numpy tensorflow-cpu joblib pandas_ta vnstock==0.2.1
+
+      - name: Run Prediction Script
+        run: python update_predictions.py
+
+      - name: Save Results to GitHub
+        run: |
+          git config --global user.name "AI-Bot"
+          git config --global user.email "bot@github.com"
+          git add vn30_signals.csv
+          git commit -m "Auto-update signals" || exit 0
+          git push
