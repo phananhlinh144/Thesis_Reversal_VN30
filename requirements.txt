@@ -2,8 +2,8 @@ streamlit
 pandas
 numpy
 tensorflow-cpu
-joblib
 pandas_ta
+vnstock
 plotly
-vnstock==0.2.1
+joblib
 scikit-learn
