@@ -84,6 +84,7 @@ def get_hybrid_data(symbol):
 def compute_features(df):
     if len(df) < 60: return pd.DataFrame()
     g = df.copy()
+    g = g.ffill().bfill()
     
     # Tính toán Returns Change
     for n in [1, 2, 3, 5, 8, 13, 21, 34, 55]: 
@@ -91,7 +92,7 @@ def compute_features(df):
         
     # Tính toán Gradient của các đường MA
     for n in [5, 10, 20]:
-        ma = g['Close'].rolling(window=n).mean().fillna(method='bfill')
+        ma = g['Close'].rolling(window=n).mean().bfill()
         g[f'Grad_{n}'] = np.gradient(ma)
     
     # Chỉ báo kỹ thuật từ pandas_ta
@@ -109,8 +110,12 @@ def compute_features(df):
     g['Dist_Prev_K10'] = 0.0
     g.loc[g['Close'] >= ma20, 'Dist_Prev_K10'] = (g['Close'] - g['Close'].rolling(20).min()) / g['Close'].rolling(20).min()
     g.loc[g['Close'] < ma20, 'Dist_Prev_K10'] = (g['Close'] - g['Close'].rolling(20).max()) / g['Close'].rolling(20).max()
+
+    g = g.dropna()
     
-    return g.dropna().reset_index(drop=True)
+    if len(g) < 55:
+        print(f"⚠️ Cảnh báo: Dữ liệu sau khi tính toán quá ít dòng.")
+    return g.reset_index(drop=True)
 
 def predict_at_index(df_feat, symbol, idx=-1):
     actual_idx = len(df_feat) + idx if idx < 0 else idx
@@ -177,3 +182,4 @@ if __name__ == "__main__":
     if final_output:
         pd.DataFrame(final_output).to_csv('vn30_signals.csv', index=False, encoding='utf-8-sig')
         print(f"\n✅ Hệ thống đã cập nhật vn30_signals.csv thành công!")
+
