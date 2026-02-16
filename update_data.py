@@ -16,11 +16,25 @@ def get_new_data(symbol, start_date):
         
         if df_temp is not None and not df_temp.empty:
             temp = df_temp.copy()
-            temp['Date'] = pd.to_datetime(temp['time']).dt.strftime('%Y-%m-%d')
-            temp['Symbol'] = symbol
-            temp = temp.rename(columns={'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'})
             
-            # CHỈ LẤY ĐÚNG 7 CỘT CHUẨN
+            # 1. ĐỔI TÊN trực tiếp 'time' thành 'Date' (để không bị sinh thêm cột)
+            temp = temp.rename(columns={
+                'time': 'Date',
+                'open': 'Open', 
+                'high': 'High', 
+                'low': 'Low', 
+                'close': 'Close', 
+                'volume': 'Volume'
+            })
+            
+            # 2. Định dạng lại ngày và gán mã chứng khoán
+            temp['Date'] = pd.to_datetime(temp['Date']).dt.strftime('%Y-%m-%d')
+            temp['Symbol'] = symbol
+            
+            # 3. Lọc bỏ dữ liệu trước 2018 nếu lỡ có bị dính
+            temp = temp[temp['Date'] >= '2018-01-01']
+            
+            # 4. CHỈ GIỮ ĐÚNG 7 CỘT CHUẨN
             return temp[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Symbol']]
         return pd.DataFrame()
     except Exception as e:
@@ -32,13 +46,16 @@ if __name__ == "__main__":
 
     if os.path.exists(CSV_FILE):
         old_df = pd.read_csv(CSV_FILE)
+        
+        # Dọn dẹp file cũ nếu lỡ bị dư cột Date/time trước đó
         valid_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Symbol']
         
+        # Nếu file cũ có 'time' mà chưa có 'Date' thì đổi tên luôn
         if 'time' in old_df.columns and 'Date' not in old_df.columns:
             old_df = old_df.rename(columns={'time': 'Date'})
             
-        existing_cols = [c for c in valid_cols if c in old_df.columns]
-        old_df = old_df[existing_cols]
+        # Chỉ giữ lại các cột chuẩn, bỏ mọi cột rác
+        old_df = old_df[[c for c in valid_cols if c in old_df.columns]]
         
         old_df['Date'] = pd.to_datetime(old_df['Date']).dt.strftime('%Y-%m-%d')
         latest_date_str = old_df['Date'].max()
@@ -58,18 +75,20 @@ if __name__ == "__main__":
         if not df_new.empty:
             new_data_list.append(df_new)
         
-        # Cứ mỗi mã nghỉ đúng 1.7 giây
+        # Nghỉ đúng 1.7 giây mỗi mã để tránh bị chặn
         time.sleep(1.7)
 
     if new_data_list:
         all_new_df = pd.concat(new_data_list, ignore_index=True)
         final_df = pd.concat([old_df, all_new_df], ignore_index=True)
-        final_df = final_df.drop_duplicates(subset=['Date', 'Symbol'], keep='last')
         
+        # Xóa trùng và sắp xếp chuẩn
+        final_df = final_df.drop_duplicates(subset=['Date', 'Symbol'], keep='last')
         final_df = final_df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Symbol']]
         final_df = final_df.sort_values(by=['Symbol', 'Date'])
         
+        # Lưu file đè lên file cũ
         final_df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
-        print(f"\n✅ Đã cập nhật xong file sạch!")
+        print(f"\n✅ Cập nhật file sạch thành công (Chỉ còn 1 cột Date)!")
     else:
-        print("\n☕ Không có gì mới.")
+        print("\n☕ Không có gì mới để cập nhật.")
