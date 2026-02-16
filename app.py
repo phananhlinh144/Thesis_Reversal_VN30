@@ -28,23 +28,39 @@ vn30_symbols = ['ACB', 'BCM', 'BID', 'CTG', 'DGC', 'FPT', 'GAS', 'GVR', 'HDB', '
 FEATS_FULL = ['RC_1', 'RC_2', 'RC_3', 'RC_5', 'RC_8', 'RC_13', 'RC_21', 'RC_34', 'RC_55', 'Grad_5', 'Grad_10', 'Grad_20', 'RSI', 'BB_PctB', 'MACD_Hist', 'Vol_Ratio', 'ATR_Rel', 'Dist_Prev_K10']
 
 # --- 2. HÀM XỬ LÝ DỮ LIỆU DRIVE + REALTIME ---
-@st.cache_data(ttl=3600) # Lưu cache dữ liệu 1 tiếng
+@st.cache_data(ttl=3600)
 def get_integrated_data(symbol):
     try:
-        # 1. Tải dữ liệu từ Google Drive (Làm nền)
+        # 1. Tải dữ liệu từ Google Drive
         drive_url = 'https://drive.google.com/uc?id=1xG6J9fBEF_Z4KY3x_frUwnhVTSA6HG2r'
         output = 'historical_data.csv'
         if not os.path.exists(output):
             gdown.download(drive_url, output, quiet=True)
         
         full_df_history = pd.read_csv(output)
-        df_hist = full_df_history[full_df_history['ticker'] == symbol].copy()
+        
+        # Tự động tìm cột chứa mã cổ phiếu (Ticker/Symbol/MaCP)
+        # Chúng ta sẽ kiểm tra xem cột nào có tên giống 'ticker' hoặc 'symbol'
+        col_name = None
+        for c in full_df_history.columns:
+            if c.lower() in ['ticker', 'symbol', 'macp', 'ma']:
+                col_name = c
+                break
+        
+        if col_name:
+            df_hist = full_df_history[full_df_history[col_name] == symbol].copy()
+        else:
+            # Nếu không tìm thấy cột mã, giả định file này chỉ chứa 1 mã duy nhất
+            # và lọc theo cột Date để an toàn
+            df_hist = full_df_history.copy()
+            st.warning(f"⚠️ Không tìm thấy cột 'ticker' trong file Drive. Đang lấy toàn bộ dữ liệu làm base cho {symbol}.")
+
         df_hist['Date'] = pd.to_datetime(df_hist['Date'])
         
         # 2. Lấy ngày cuối trong drive
         last_date_drive = df_hist['Date'].max()
         
-        # 3. Lấy thêm dữ liệu từ ngày đó đến hiện tại qua Vnstock
+        # 3. Lấy thêm dữ liệu mới từ Vnstock
         stock = Vnstock().stock(symbol=symbol, source='VCI')
         df_new = stock.quote.history(start=last_date_drive.strftime('%Y-%m-%d'), 
                                      end=datetime.now().strftime('%Y-%m-%d'))
@@ -52,7 +68,7 @@ def get_integrated_data(symbol):
         if df_new is not None and not df_new.empty:
             df_new = df_new.rename(columns={'time':'Date','open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'})
             df_new['Date'] = pd.to_datetime(df_new['Date'])
-            # Gộp và xóa trùng
+            # Gộp và xóa trùng ngày (ưu tiên dữ liệu mới từ Vnstock)
             df_final = pd.concat([df_hist, df_new]).drop_duplicates(subset=['Date'], keep='last')
         else:
             df_final = df_hist
@@ -60,7 +76,15 @@ def get_integrated_data(symbol):
         return df_final.sort_values('Date').reset_index(drop=True)
     except Exception as e:
         st.error(f"Lỗi tải dữ liệu {symbol}: {e}")
-        return pd.DataFrame()
+        # Nếu lỗi Drive, thử lấy thẳng từ Vnstock 300 phiên để app không bị chết
+        try:
+            stock = Vnstock().stock(symbol=symbol, source='VCI')
+            df = stock.quote.history(start=(datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d'), end=datetime.now().strftime('%Y-%m-%d'))
+            df = df.rename(columns={'time':'Date','open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'})
+            df['Date'] = pd.to_datetime(df['Date'])
+            return df.sort_values('Date').reset_index(drop=True)
+        except:
+            return pd.DataFrame()
 
 def compute_features(df):
     if len(df) < 60: return pd.DataFrame()
@@ -218,3 +242,4 @@ with t3:
                 "win50": r['win50'], "win10": r['win10'], "ENSEMBLE": r['ensemble']
             })
         st.table(pd.DataFrame(hist_list[::-1])) # Hiện mới nhất lên đầu
+
