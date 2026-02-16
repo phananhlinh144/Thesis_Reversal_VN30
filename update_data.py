@@ -75,8 +75,8 @@ if __name__ == "__main__":
         if not df_new.empty:
             new_data_list.append(df_new)
         
-        # Nghỉ đúng 1.7 giây mỗi mã để tránh bị chặn
-        time.sleep(1.7)
+        # Nghỉ đúng 2 giây mỗi mã để tránh bị chặn
+        time.sleep(2)
 
     if new_data_list:
         all_new_df = pd.concat(new_data_list, ignore_index=True)
