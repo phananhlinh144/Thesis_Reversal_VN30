@@ -39,16 +39,16 @@ FEATS_FULL = ['RC_1', 'RC_2', 'RC_3', 'RC_5', 'RC_8', 'RC_13', 'RC_21', 'RC_34',
 # --- 2. HÀM XỬ LÝ DỮ LIỆU LAI (HYBRID DATA) ---
 
 def get_hybrid_data(symbol):
-    """Lấy dữ liệu cũ từ file/API lịch sử và nối với DNSE từ 11/01/2026"""
+    """Lấy dữ liệu cũ từ file/API lịch sử và nối với VCI từ 11/01/2026"""
     try:
-        stock = Vnstock().stock(symbol=symbol, source='DNSE')
+        stock = Vnstock().stock(symbol=symbol, source='VCI')
         
         # 1. Lấy dữ liệu quá khứ (trước 11/01/2026) - Giả định lấy từ nguồn lịch sử chuẩn
         # Ở đây ta lấy từ 1 năm trước đến 10/01/2026
         df_old = stock.quote.history(start=(datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d'), 
                                      end='2026-01-10')
         
-        # 2. Lấy dữ liệu mới từ DNSE (từ 11/01/2026 đến nay)
+        # 2. Lấy dữ liệu mới từ VCI (từ 11/01/2026 đến nay)
         df_new = stock.quote.history(start='2026-01-11', 
                                      end=datetime.now().strftime('%Y-%m-%d'))
         
@@ -178,3 +178,4 @@ with tab3:
                 st.warning("Không có dữ liệu trong khoảng ngày này.")
     else:
         st.info("Hãy chọn mã và bấm Phân tích ở Tab 2 trước.")
+
