@@ -49,10 +49,10 @@ def get_integrated_data(symbol):
         last_date_drive = df_hist['Date'].max()
         
         # 2. Lấy data mới (Real-time) từ Vnstock
-        # Lưu ý: Vnstock trên Cloud thường bị VCI chặn, ta bọc trong try-except chặt chẽ
+        # Lưu ý: Vnstock trên Cloud thường bị DNSE chặn, ta bọc trong try-except chặt chẽ
         try:
             client = Vnstock()
-            stock = client.stock(symbol=symbol, source='VCI')
+            stock = client.stock(symbol=symbol, source='DNSE')
             # Lấy từ ngày cuối của Drive đến hiện tại
             df_new = stock.quote.history(start=last_date_drive.strftime('%Y-%m-%d'), 
                                          end=datetime.now().strftime('%Y-%m-%d'))
@@ -145,8 +145,8 @@ t1, t2, t3 = st.tabs(["🚀 Tổng hợp VN30", "📊 Đồ thị AI", "🔍 Chi
 with t1:
     df_res = st.session_state.all_results
     if df_res.empty:
-        st.warning("⚠️ Không lấy được dữ liệu. Kiểm tra nguồn VCI hoặc nhấn Làm mới.")
-        st.error("⚠️ VCI vẫn chặn hoặc không có dữ liệu. Hãy thử lại sau vài phút.")
+        st.warning("⚠️ Không lấy được dữ liệu. Kiểm tra nguồn DNSE hoặc nhấn Làm mới.")
+        st.error("⚠️ DNSE vẫn chặn hoặc không có dữ liệu. Hãy thử lại sau vài phút.")
     else:
         c1, c2, c3 = st.columns(3)
         with c1: 
@@ -221,4 +221,5 @@ with t3:
                 if r:
                     hist_data.append({"Ngày": df_hc['Date'].iloc[i].strftime('%d/%m/%Y'), "Giá": f"{df_hc['Close'].iloc[i]:,.0f}", "win50": r['win50'], "win10": r['win10'], "ENSEMBLE": r['ENSEMBLE']})
             st.table(pd.DataFrame(hist_data[::-1]))
+
 
