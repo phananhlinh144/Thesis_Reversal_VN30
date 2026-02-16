@@ -35,6 +35,13 @@ jobs:
         run: |
           git config --global user.name "AI-Bot"
           git config --global user.email "bot@github.com"
-          git add vn30_signals.csv
-          git commit -m "Update signals $(date)" || exit 0
-          git push
+          
+          # Kiểm tra nếu file tồn tại thì mới add và commit
+          if [ -f "vn30_signals.csv" ]; then
+            git add vn30_signals.csv
+            git commit -m "Update signals $(date)" || echo "No changes to commit"
+            git push
+          else
+            echo "❌ Lỗi: Không tìm thấy file vn30_signals.csv để lưu!"
+            exit 1
+          fi
