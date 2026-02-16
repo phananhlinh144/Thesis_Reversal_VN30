@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from vnstock import Vnstock
 
 # ==============================================================================
-# 1. CẤU HÌNH & CACHE MODEL (Fix Warning Streamlit)
+# 1. CẤU HÌNH & CACHE MODEL
 # ==============================================================================
 st.set_page_config(page_title="VN30 AI Forecast 2026", layout="wide")
 
@@ -37,46 +37,62 @@ def load_ai_system():
 model_win50, model_win10, scaler_bundle = load_ai_system()
 
 # ==============================================================================
-# 2. HÀM XỬ LÝ (Fix FutureWarnings)
+# 2. HÀM XỬ LÝ (Đã sửa FutureWarnings & Chuẩn hóa cột)
 # ==============================================================================
 
 def compute_features(df):
     g = df.copy()
     if len(g) < 60: return pd.DataFrame()
-    for n in [1, 2, 3, 5, 8, 13, 21, 34, 55]: g[f'RC_{n}'] = g['Close'].pct_change(n) * 100
-    # Fix: dùng .bfill() thay vì fillna(method='bfill')
+    
+    # Tính toán RC
+    for n in [1, 2, 3, 5, 8, 13, 21, 34, 55]: 
+        g[f'RC_{n}'] = g['Close'].pct_change(n) * 100
+    
+    # Tính toán Grad (Sửa fillna deprecated)
     for n in [5, 10, 20]:
         ma = g['Close'].rolling(window=n).mean()
         g[f'Grad_{n}'] = np.gradient(ma.bfill())
         
     g['Vol_Ratio'] = g['Volume'] / ta.sma(g['Volume'], length=20)
     g['RSI'] = ta.rsi(g['Close'], length=14)
+    
     bb = ta.bbands(g['Close'], length=20, std=2)
     g['BB_PctB'], g['BB_Upper'], g['BB_Lower'] = bb.iloc[:, 4], bb.iloc[:, 2], bb.iloc[:, 0]
+    
     g['MACD_Hist'] = ta.macd(g['Close']).iloc[:, 1]
     g['ATR_Rel'] = ta.atr(g['High'], g['Low'], g['Close'], length=14) / g['Close']
     
     rmin, rmax = g['Close'].rolling(20).min(), g['Close'].rolling(20).max()
     ma20 = g['Close'].rolling(20).mean()
+    
     g['Dist_Prev_K10'] = 0.0
     g.loc[g['Close'] >= ma20, 'Dist_Prev_K10'] = (g['Close'] - rmin) / rmin
     g.loc[g['Close'] < ma20, 'Dist_Prev_K10'] = (g['Close'] - rmax) / rmax
+    
     return g.dropna().reset_index(drop=True)
 
 def get_data_for_symbol(symbol, fetch_live=True):
     try:
-        df_hist = pd.read_csv(CSV_PATH)
-        df_hist = df_hist[df_hist['Symbol'] == symbol].copy()
+        df_raw = pd.read_csv(CSV_PATH)
+        # CHUẨN HÓA TÊN CỘT NGAY TỪ ĐẦU (Viết hoa chữ cái đầu)
+        df_raw.columns = [c.capitalize() for c in df_raw.columns]
+        
+        df_hist = df_raw[df_raw['Symbol'] == symbol].copy()
         df_hist['Date'] = pd.to_datetime(df_hist['Date'])
         df_hist = df_hist.sort_values('Date')
+        
         if fetch_live:
             try:
                 live = Vnstock().stock(symbol=symbol, source='VCI').quote.now()
                 if not live.empty:
-                    p, v, h, l = float(live['close'].iloc[0]), float(live['volume'].iloc[0]), float(live['high'].iloc[0]), float(live['low'].iloc[0])
+                    # Vnstock trả về chữ thường -> map thủ công vào biến
+                    p, v, h, l = float(live['close'].iloc[0]), float(live['volume'].iloc[0]), \
+                                 float(live['high'].iloc[0]), float(live['low'].iloc[0])
+                    
                     today = pd.Timestamp(datetime.now().date())
                     if df_hist.empty or df_hist.iloc[-1]['Date'].date() < today.date():
-                        df_hist = pd.concat([df_hist, pd.DataFrame([{'Date':today,'Open':p,'High':h,'Low':l,'Close':p,'Volume':v,'Symbol':symbol}])], ignore_index=True)
+                        new_data = pd.DataFrame([{'Date':today,'Open':p,'High':h,'Low':l,'Close':p,'Volume':v,'Symbol':symbol}])
+                        df_hist = pd.concat([df_hist, new_data], ignore_index=True)
                     else:
                         idx = df_hist.index[-1]
                         df_hist.at[idx,'Close'], df_hist.at[idx,'High'], df_hist.at[idx,'Low'], df_hist.at[idx,'Volume'] = p, max(df_hist.at[idx,'High'],h), min(df_hist.at[idx,'Low'],l), v
@@ -87,20 +103,27 @@ def get_data_for_symbol(symbol, fetch_live=True):
 def predict_single_row(df_calc, idx_target=-1, symbol=''):
     if len(df_calc) < 55: return None
     end = idx_target + 1 if idx_target != -1 else len(df_calc)
+    
     d50, d10 = df_calc.iloc[end-50:end], df_calc.iloc[end-10:end]
     scaler = scaler_bundle['local_scalers_dict'].get(symbol, scaler_bundle['global_scaler'])
-    s50, s10 = scaler.transform(d50[FEATS_FULL]), scaler.transform(d10[FEATS_FULL])
+    
+    s50 = scaler.transform(d50[FEATS_FULL])
+    s10 = scaler.transform(d10[FEATS_FULL])
+    
     p50 = model_win50.predict(np.expand_dims(s50, axis=0), verbose=0)[0]
     p10 = model_win10.predict(np.expand_dims(s10[:, :17], axis=0), verbose=0)[0]
+    
     c50, c10 = np.argmax(p50), np.argmax(p10)
     sig = "NGANG"
     if c50 == 0 and c10 == 0: sig = "MUA"
     elif c50 == 2 and c10 == 2: sig = "BÁN"
-    return {'Date': df_calc.iloc[end-1]['Date'], 'Close': df_calc.iloc[end-1]['Close'], 'Ensemble': sig,
-            'Model_50': f"{['mua','ngang','bán'][c50]} ({p50[c50]:.0%})", 'Model_10': f"{['mua','ngang','bán'][c10]} ({p10[c10]:.0%})"}
+    
+    return {'Date': df_calc.iloc[end-1]['Date'], 'Close': df_calc.iloc[end-1]['Close'], 
+            'Ensemble': sig, 'Model_50': f"{['mua','ngang','bán'][c50]} ({p50[c50]:.0%})", 
+            'Model_10': f"{['mua','ngang','bán'][c10]} ({p10[c10]:.0%})"}
 
 # ==============================================================================
-# 3. GIAO DIỆN CHÍNH
+# 3. GIAO DIỆN
 # ==============================================================================
 st.title("🤖 VN30 AI TRADING SYSTEM")
 vn30_list = ['ACB','BCM','BID','CTG','DGC','FPT','GAS','GVR','HDB','HPG','LPB','MSN','MBB','MWG','PLX','SAB','SHB','SSB','SSI','STB','TCB','TPB','VCB','VIC','VHM','VIB','VJC','VNM','VPB','VRE']
@@ -115,44 +138,54 @@ with t1:
             r = predict_single_row(d, symbol=s)
             if r: res_all.append({'Mã':s, 'Giá':f"{int(r['Close']):,}", 'AI':r['Ensemble'], 'Dài':r['Model_50'], 'Ngắn':r['Model_10']})
             bar.progress((i+1)/len(vn30_list))
+        
         df_res = pd.DataFrame(res_all)
-        c_mua, c_ban, c_ngang = st.columns(3)
-        with c_mua: st.success("🟢 MUA"); st.table(df_res[df_res['AI']=='MUA'])
-        with c_ban: st.error("🔴 BÁN"); st.table(df_res[df_res['AI']=='BÁN'])
-        with c_ngang: st.warning("🟡 NGANG"); st.table(df_res[df_res['AI']=='NGANG'])
+        c1, c2, c3 = st.columns(3)
+        with c1: st.success("🟢 MUA"); st.table(df_res[df_res['AI']=='MUA'])
+        with c2: st.error("🔴 BÁN"); st.table(df_res[df_res['AI']=='BÁN'])
+        with c3: st.warning("🟡 NGANG"); st.table(df_res[df_res['AI']=='NGANG'])
 
 with t2:
-    col_sym, col_type = st.columns([2, 2])
-    with col_sym: s_chart = st.selectbox("Chọn mã:", vn30_list, key='s2')
-    with col_type: v_type = st.radio("Kiểu giá:", ["Nến", "Đường"], horizontal=True)
+    col1, col2 = st.columns([1, 1])
+    with col1: s_chart = st.selectbox("Chọn mã cổ phiếu:", vn30_list, key='s2')
+    with col2: v_type = st.radio("Kiểu hiển thị giá:", ["Nến", "Đường"], horizontal=True)
     
     if s_chart:
         df_c = compute_features(get_data_for_symbol(s_chart))
+        # Chỉ lấy 60 nến gần nhất để biểu đồ rõ nét
         plot_df = df_c.tail(60)
+        
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
         
-        # 1. Biểu đồ giá (Candle or Line)
         if v_type == "Nến":
-            fig.add_trace(go.Candlestick(x=plot_df['Date'], open=plot_df['Open'], high=plot_df['High'], low=plot_df['Low'], close=plot_df['Close'], name='Nến'), row=1, col=1)
+            fig.add_trace(go.Candlestick(x=plot_df['Date'], open=plot_df['Open'], high=plot_df['High'], 
+                                         low=plot_df['Low'], close=plot_df['Close'], name='Nến'), row=1, col=1)
         else:
-            fig.add_trace(go.Scatter(x=plot_df['Date'], y=plot_df['Close'], mode='lines+markers', name='Đường giá', line=dict(color='blue')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=plot_df['Date'], y=plot_df['Close'], mode='lines+markers', name='Giá Đóng'), row=1, col=1)
         
-        # 2. RSI với vạch 70/30 đúng hình mẫu
+        # RSI với đường 70/30
         fig.add_trace(go.Scatter(x=plot_df['Date'], y=plot_df['RSI'], name='RSI', line=dict(color='purple')), row=2, col=1)
         fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
         fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
         
-        fig.update_layout(height=600, xaxis_rangeslider_visible=False)
+        fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_white")
+        # Streamlit 2026: use_container_width=True vẫn dùng tốt hoặc đổi thành width='stretch'
         st.plotly_chart(fig, use_container_width=True)
 
 with t3:
     c_s, c_d = st.columns([1, 2])
-    with c_s: s_tab3 = st.selectbox("Chọn mã:", vn30_list, key='s3')
-    with c_d: lookback = st.slider("Xem lại bao nhiêu ngày?", 5, 30, 10)
+    with c_s: s_tab3 = st.selectbox("Chọn mã soi chi tiết:", vn30_list, key='s3')
+    with c_d: lookback = st.slider("Số phiên xem lại:", 5, 50, 20)
     
     if s_tab3:
         df_c = compute_features(get_data_for_symbol(s_tab3))
-        # Fix Warning applymap -> map
-        re_list = [predict_single_row(df_c, idx_target=i, symbol=s_tab3) for i in range(len(df_c)-1, len(df_c)-1-lookback, -1)]
-        df_t = pd.DataFrame([r for r in re_list if r])
-        st.dataframe(df_t.style.map(lambda v: f"color: {'#00CC00' if v=='MUA' else '#FF0000' if v=='BÁN' else '#FFBB00'}; font-weight: bold", subset=['Ensemble']), use_container_width=True)
+        # Dự báo lịch sử
+        hist_predictions = []
+        for i in range(len(df_c)-1, len(df_c)-1-lookback, -1):
+            if i < 55: break
+            res = predict_single_row(df_c, idx_target=i, symbol=s_tab3)
+            if res: hist_predictions.append(res)
+        
+        df_t = pd.DataFrame(hist_predictions)
+        # Sửa applymap -> map để hết cảnh báo
+        st.dataframe(df_t.style.map(lambda v: f"color: {'green' if v=='MUA' else 'red' if v=='BÁN' else 'orange'}; font-weight: bold", subset=['Ensemble']), use_container_width=True)
