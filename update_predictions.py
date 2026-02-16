@@ -8,6 +8,8 @@ import os
 import gspread
 from datetime import datetime
 from vnstock import *
+
+# Tắt các cảnh báo để log sạch sẽ
 warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -170,4 +172,5 @@ if __name__ == "__main__":
         time.sleep(1.0) 
     if final_output:
         push_to_sheets(final_output)
+
 
