@@ -257,7 +257,7 @@ with tab1:
             st.markdown("### 🟢 KHUYẾN NGHỊ MUA")
             df_buy = df_res[df_res['Tín hiệu'] == 'MUA']
             if not df_buy.empty:
-                st.dataframe(df_buy, hide_index=True, use_container_width=True)
+                st.dataframe(df_buy, hide_index=True, width='stretch')
             else:
                 st.caption("Không có mã khuyến nghị Mua.")
                 
@@ -267,7 +267,7 @@ with tab1:
             st.markdown("### 🔴 KHUYẾN NGHỊ BÁN")
             df_sell = df_res[df_res['Tín hiệu'] == 'BÁN']
             if not df_sell.empty:
-                st.dataframe(df_sell, hide_index=True, use_container_width=True)
+                st.dataframe(df_sell, hide_index=True, width='stretch')
             else:
                 st.caption("Không có mã khuyến nghị Bán.")
                 
@@ -277,16 +277,18 @@ with tab1:
             st.markdown("### 🟡 TRẠNG THÁI SIDEWAY/NGANG")
             df_hold = df_res[df_res['Tín hiệu'] == 'NGANG']
             if not df_hold.empty:
-                st.dataframe(df_hold, hide_index=True, use_container_width=True)
+                st.dataframe(df_hold, hide_index=True, width='stretch')
             else:
                 st.caption("Không có mã đi ngang.")
 
 # --- TAB 2: BIỂU ĐỒ & PAGAN CIRCLES ---
 with tab2:
-    c_sel1, c_sel2, c_sel3 = st.columns([1, 1, 1])
+    # --- THÊM CỘT 4 ĐỂ CHỌN LOẠI BIỂU ĐỒ ---
+    c_sel1, c_sel2, c_sel3, c_sel4 = st.columns([1, 1, 1, 1])
     with c_sel1: selected_sym = st.selectbox("Chọn mã:", VN30_LIST, key='chart_sym')
     with c_sel2: start_date = st.date_input("Từ ngày:", datetime.now() - timedelta(days=120))
     with c_sel3: end_date = st.date_input("Đến ngày:", datetime.now())
+    with c_sel4: chart_type = st.selectbox("Loại biểu đồ:", ["Nến (Candles)", "Đường (Line)"], key='chart_type')
 
     if st.button("Vẽ biểu đồ phân tích"):
         with st.spinner(f"Đang xử lý {selected_sym}..."):
@@ -316,30 +318,37 @@ with tab2:
                     row_heights=[0.75, 0.25], specs=[[{"secondary_y": True}], [{"secondary_y": False}]]
                 )
                 
-                # 1. CANDLESTICK (Dùng Date_Str làm trục X)
-                fig.add_trace(go.Candlestick(
-                    x=df_plot['Date_Str'], open=df_plot['Open'], high=df_plot['High'],
-                    low=df_plot['Low'], close=df_plot['Close'], name='Giá'
-                ), row=1, col=1, secondary_y=False)
+                # 1. BIỂU ĐỒ GIÁ (NẾN HOẶC ĐƯỜNG) - XỬ LÝ LOGIC TẠI ĐÂY
+                if chart_type == "Nến (Candles)":
+                    fig.add_trace(go.Candlestick(
+                        x=df_plot['Date_Str'], open=df_plot['Open'], high=df_plot['High'],
+                        low=df_plot['Low'], close=df_plot['Close'], name='Giá'
+                    ), row=1, col=1, secondary_y=False)
+                else:
+                    fig.add_trace(go.Scatter(
+                        x=df_plot['Date_Str'], y=df_plot['Close'], 
+                        mode='lines', line=dict(color='#00F0FF', width=2), name='Giá (Line)'
+                    ), row=1, col=1, secondary_y=False)
 
-                # BB Bands
+                # BB Bands (GIỮ NGUYÊN)
                 fig.add_trace(go.Scatter(x=df_plot['Date_Str'], y=df_plot['BB_Upper'], line=dict(color='gray', width=1), name='BB Upper', showlegend=False), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df_plot['Date_Str'], y=df_plot['BB_Lower'], line=dict(color='gray', width=1), fill='tonexty', fillcolor='rgba(200,200,200,0.1)', name='BB Lower', showlegend=False), row=1, col=1)
 
-                # Volume
+                # Volume (GIỮ NGUYÊN)
                 colors_vol = ['green' if c >= o else 'red' for c, o in zip(df_plot['Close'], df_plot['Open'])]
                 fig.add_trace(go.Bar(x=df_plot['Date_Str'], y=df_plot['Volume'], marker_color=colors_vol, opacity=0.3, name='Volume'), row=1, col=1, secondary_y=True)
 
-                # RSI
+                # RSI (GIỮ NGUYÊN)
                 fig.add_trace(go.Scatter(x=df_plot['Date_Str'], y=df_plot['RSI'], line=dict(color='purple'), name='RSI'), row=2, col=1)
                 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
                 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
                 if not df_sigs.empty:
-                    # AI Signals
+                    # AI Signals (GIỮ NGUYÊN)
                     buys = df_sigs[df_sigs['Ensemble'] == 'MUA']
                     sells = df_sigs[df_sigs['Ensemble'] == 'BÁN']
                     
+                    # Logic vẽ marker vẫn hoạt động tốt trên cả Nến và Đường vì dùng chung trục X (Date_Str)
                     fig.add_trace(go.Scatter(
                         x=buys['Date_Str'], y=buys['Low']*0.99, mode='markers', 
                         marker=dict(symbol='triangle-up', size=10, color='lime'), name='AI Mua'
@@ -350,13 +359,10 @@ with tab2:
                         marker=dict(symbol='triangle-down', size=10, color='red'), name='AI Bán'
                     ), row=1, col=1)
 
-                    # --- PAGAN K10 CIRCLES (BIẾN Y LABEL) ---
-                    # Lấy các điểm là đỉnh/đáy thực tế (đã tính ở compute_features)
+                    # --- PAGAN K10 CIRCLES (GIỮ NGUYÊN) ---
                     pagan_tops = df_sigs[df_sigs['Is_Pagan_Top'] == True]
                     pagan_bots = df_sigs[df_sigs['Is_Pagan_Bottom'] == True]
 
-                    # Vẽ vòng tròn rỗng to (Hollow Circles)
-                    # circle-open: hình tròn rỗng
                     fig.add_trace(go.Scatter(
                         x=pagan_tops['Date_Str'], y=pagan_tops['High']*1.005,
                         mode='markers',
@@ -380,7 +386,7 @@ with tab2:
                     legend=dict(orientation="h", y=1.02)
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.warning("Dữ liệu không đủ để vẽ.")
 
@@ -415,4 +421,4 @@ with tab3:
             return 'color: #ffc107'
 
         if not df_hist_show.empty:
-            st.dataframe(df_hist_show.style.map(color_signal, subset=['Tín hiệu AI']), use_container_width=True)
+            st.dataframe(df_hist_show.style.map(color_signal, subset=['Tín hiệu AI']), width='stretch')
