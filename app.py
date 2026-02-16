@@ -15,7 +15,7 @@ from vnstock import Vnstock
 # ==============================================================================
 st.set_page_config(page_title="VN30 AI Forecast", layout="wide")
 
-# Đường dẫn model
+# Lưu ý: Trên GitHub phải có thư mục 'models_scaling' chứa 3 file này
 MODEL_WIN50_PATH = 'models_scaling/Full_K10_Win50_Hybrid.keras'
 MODEL_WIN10_PATH = 'models_scaling/Baseline_K10_Win10_Hybrid.keras'
 SCALER_PATH      = 'models_scaling/smart_scaler_system.pkl'
@@ -363,4 +363,5 @@ with tab3:
                 
         st.write(f"### Chi tiết tín hiệu {sym_tab3} ({days_back} phiên gần nhất)")
         st.dataframe(pd.DataFrame(table_data))
+
 
