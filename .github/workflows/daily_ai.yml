@@ -11,6 +11,10 @@ on:
 jobs:
   run_ai:
     runs-on: ubuntu-latest
+    # QUAN TRỌNG: Cấp quyền ghi vào Repo
+    permissions:
+      contents: write
+      
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -22,7 +26,15 @@ jobs:
 
       - name: Install libraries
         run: |
-          pip install pandas numpy==1.26.4 tensorflow-cpu vnstock==0.2.1 gspread oauth2client joblib scikit-learn beautifulsoup4 lxml requests
-      
+          pip install pandas numpy==1.26.4 tensorflow-cpu vnstock==0.2.1 joblib scikit-learn beautifulsoup4 lxml requests
+
       - name: Run Prediction Script
         run: python update_predictions.py
+
+      - name: Save and Push CSV
+        run: |
+          git config --global user.name "AI-Bot"
+          git config --global user.email "bot@github.com"
+          git add vn30_signals.csv
+          git commit -m "Update signals $(date)" || exit 0
+          git push
