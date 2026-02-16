@@ -129,35 +129,74 @@ with tab_detail:
     if st.button(f"🔍 Phân tích sâu {sel_sym}"):
         df = get_data(sel_sym)
         df_p = build_feats(df)
-        if not df_p.empty:
+        
+        if not df_p.empty and len(df_p) >= 50:
             p50, p10 = run_pred(df_p, sel_sym)
             if p50 is not None:
                 ens_text, _ = get_ensemble_signal(p50, p10)
                 
-                # Tính Bollinger Bands
-                bb = ta.bbands(df_p['Close'], length=20, std=2)
-                df_plot = pd.concat([df_p, bb], axis=1).tail(60)
-
-                # Vẽ Biểu đồ 3 tầng
-                fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.5, 0.2, 0.3])
-                # Tầng 1: Candle + BB
-                fig.add_trace(go.Candlestick(x=df_plot['Date'], open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name='Giá'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot['BBU_20_2.0'], line=dict(color='rgba(173, 216, 230, 0.4)'), name='BB Upper'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot['BBL_20_2.0'], line=dict(color='rgba(173, 216, 230, 0.4)'), fill='tonexty', name='BB Lower'), row=1, col=1)
+                # --- TÍNH TOÁN CÁC CHỈ BÁO KỸ THUẬT ---
+                # Tính Bollinger Bands với tên cột được kiểm soát
+                bb_data = ta.bbands(df_p['Close'], length=20, std=2)
+                # Ghép vào df gốc
+                df_plot = pd.concat([df_p, bb_data], axis=1).tail(60)
                 
-                # Mũi tên dự báo
-                arrow_c = "green" if "MUA" in ens_text else ("red" if "BÁN" in ens_text else "gray")
-                fig.add_annotation(x=df_plot['Date'].iloc[-1], y=df_plot['Close'].iloc[-1], text=f"AI: {ens_text}", showarrow=True, arrowhead=2, arrowcolor=arrow_c, ay=-50 if "MUA" in ens_text else 50)
+                # Tìm chính xác tên cột của BB để tránh KeyError
+                # Thường là: BBL_20_2.0, BBM_20_2.0, BBU_20_2.0
+                upper_col = [c for c in df_plot.columns if c.startswith('BBU_')][0]
+                lower_col = [c for c in df_plot.columns if c.startswith('BBL_')][0]
+                mid_col = [c for c in df_plot.columns if c.startswith('BBM_')][0]
+
+                # --- VẼ BIỂU ĐỒ 3 TẦNG CHUYÊN NGHIỆP ---
+                fig = make_subplots(
+                    rows=3, cols=1, 
+                    shared_xaxes=True, 
+                    vertical_spacing=0.03, 
+                    subplot_titles=(f"Nến Nhật & Bollinger Bands - {sel_sym}", "Sức mạnh tương đối RSI", "Khối lượng giao dịch Volume"),
+                    row_heights=[0.5, 0.2, 0.3]
+                )
+
+                # Tầng 1: Candlestick + BB
+                fig.add_trace(go.Candlestick(
+                    x=df_plot['Date'], open=df_plot['Open'], high=df_plot['High'], 
+                    low=df_plot['Low'], close=df_plot['Close'], name='Nến giá'
+                ), row=1, col=1)
+                
+                fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot[upper_col], line=dict(color='rgba(173, 216, 230, 0.4)', width=1), name='BB Upper'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot[lower_col], line=dict(color='rgba(173, 216, 230, 0.4)', width=1), fill='tonexty', name='BB Lower'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot[mid_col], line=dict(color='orange', dash='dot', width=1), name='Trục giữa'), row=1, col=1)
+                
+                # Mũi tên dự báo AI Ensemble
+                last_date = df_plot['Date'].iloc[-1]
+                last_price = df_plot['Close'].iloc[-1]
+                arrow_c = "green" if "MUA" in ens_text else ("red" if "BÁN" in ens_text else "yellow")
+                
+                fig.add_annotation(
+                    x=last_date, y=last_price,
+                    text=f"AI Dự báo: {ens_text}",
+                    showarrow=True, arrowhead=3, ax=0, ay=-60 if "MUA" in ens_text else 60,
+                    bgcolor=arrow_c, color="black" if "MUA" not in ens_text else "white",
+                    font=dict(size=14, weight="bold"),
+                    row=1, col=1
+                )
 
                 # Tầng 2: RSI
-                fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot['RSI'], line=dict(color='purple'), name='RSI'), row=2, col=1)
-                fig.add_hline(y=70, line_dash="dot", line_color="red", row=2, col=1)
-                fig.add_hline(y=30, line_dash="dot", line_color="green", row=2, col=1)
+                fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot['RSI'], line=dict(color='#8A2BE2', width=2), name='RSI'), row=2, col=1)
+                fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
 
                 # Tầng 3: Volume
-                fig.add_trace(go.Bar(x=df_plot['Date'], y=df_plot['Volume'], name='Volume', marker_color='orange'), row=3, col=1)
+                colors = ['green' if df_plot['Close'].iloc[i] >= df_plot['Open'].iloc[i] else 'red' for i in range(len(df_plot))]
+                fig.add_trace(go.Bar(x=df_plot['Date'], y=df_plot['Volume'], name='Khối lượng', marker_color=colors), row=3, col=1)
 
-                fig.update_layout(height=800, template='plotly_dark', xaxis_rangeslider_visible=False)
+                # Định dạng chung
+                fig.update_layout(height=900, template='plotly_dark', xaxis_rangeslider_visible=False, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
+                
+                # Hiển thị thêm các chỉ số phụ
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Giá hiện tại", f"{last_price:,}")
+                c2.metric("RSI (14)", f"{df_plot['RSI'].iloc[-1]:.2f}")
+                c3.metric("Khuyến nghị", ens_text)
         else:
-            st.error("Dữ liệu không đủ để phân tích.")
+            st.warning(f"⚠️ Dữ liệu mã {sel_sym} không đủ phiên (cần tối thiểu 50 phiên sạch) để phân tích kỹ thuật.")
