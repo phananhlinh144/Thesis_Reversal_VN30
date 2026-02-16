@@ -6,4 +6,4 @@ joblib
 pandas_ta
 plotly
 vnstock
-scikit-learn\
+scikit-learn
