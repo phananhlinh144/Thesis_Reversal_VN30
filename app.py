@@ -126,24 +126,53 @@ with tab2:
     if st.button("🚀 Bắt đầu quét"):
         summary_list = []
         prog = st.progress(0)
+        status_text = st.empty() # Để hiện thị đang quét mã nào
         client = Vnstock()
+        
         for i, sym in enumerate(vn30_symbols):
+            status_text.text(f"🔍 Đang kiểm tra: {sym}...")
             try:
-                # Lấy dữ liệu nhanh 100 phiên để tính toán
-                df_s = client.stock(symbol=sym).quote.history(start=(datetime.now()-timedelta(days=150)).strftime('%Y-%m-%d'), end=datetime.now().strftime('%Y-%m-%d'))
+                # 1. Lấy dữ liệu (Tăng lên 200 ngày cho chắc chắn đủ phiên)
+                df_s = client.stock(symbol=sym).quote.history(
+                    start=(datetime.now()-timedelta(days=200)).strftime('%Y-%m-%d'), 
+                    end=datetime.now().strftime('%Y-%m-%d')
+                )
+                
+                if df_s.empty:
+                    st.warning(f"⚠️ Mã {sym}: Không lấy được dữ liệu từ API.")
+                    continue
+                
+                # 2. Chuẩn hóa & Feature Engineering
                 df_s = df_s.rename(columns={'time':'Date','open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'})
                 df_s_p = build_features(df_s)
+                
+                if len(df_s_p) < 50:
+                    st.warning(f"⚠️ Mã {sym}: Chỉ có {len(df_s_p)} phiên sạch (Cần 50).")
+                    continue
+                
+                # 3. AI Dự báo
                 p50, p10 = get_prediction(df_s_p, sym)
+                
                 if p50 is not None:
                     r50, r10 = np.argmax(p50), np.argmax(p10)
                     summary_list.append({
                         "Mã": sym,
                         "Giá": f"{df_s_p.iloc[-1]['Close']:,}",
-                        "Win50 (Dài)": LABELS[r50],
-                        "Win10 (Ngắn)": LABELS[r10],
+                        "Model Dài": LABELS[r50],
+                        "Model Ngắn": LABELS[r10],
                         "Tin cậy": f"{np.max(p50):.1%}",
                         "Đồng thuận": "✅" if r50 == r10 else "❌"
                     })
-            except: pass
+            except Exception as e:
+                # Hiện lỗi cụ thể của mã đó để debug
+                st.error(f"❌ Lỗi tại mã {sym}: {str(e)}")
+            
             prog.progress((i + 1) / len(vn30_symbols))
-        st.dataframe(pd.DataFrame(summary_list), use_container_width=True)
+        
+        status_text.text("✅ Đã quét xong!")
+        
+        if len(summary_list) > 0:
+            st.dataframe(pd.DataFrame(summary_list), use_container_width=True)
+        else:
+            st.error("❌ Không có mã nào được dự báo thành công. Vui lòng kiểm tra lại kết nối API hoặc file Scaler.")
+
