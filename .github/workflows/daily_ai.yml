@@ -23,6 +23,6 @@ jobs:
       - name: Install libraries
         run: |
           pip install pandas numpy==1.26.4 tensorflow-cpu vnstock==0.2.1 gspread oauth2client joblib scikit-learn
-
+      
       - name: Run Prediction Script
         run: python update_predictions.py
