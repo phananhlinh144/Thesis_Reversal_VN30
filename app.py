@@ -23,194 +23,162 @@ def load_models():
         scaler = joblib.load('smart_scaler_system.pkl')
         return m50, m10, scaler
     except Exception as e:
-        st.error(f"Lỗi Load Model/Scaler: {e}")
+        st.error(f"Lỗi Load Model: {e}")
         return None, None, None
 
 model_win50, model_win10, scaler_bundle = load_models()
-if scaler_bundle:
-    global_scaler = scaler_bundle['global_scaler']
-    local_scalers = scaler_bundle['local_scalers_dict']
+global_scaler = scaler_bundle['global_scaler'] if scaler_bundle else None
+local_scalers = scaler_bundle['local_scalers_dict'] if scaler_bundle else {}
 
-FINAL_FEATURES = [
+FEATS_FULL = [
     'RC_1', 'RC_2', 'RC_3', 'RC_5', 'RC_8', 'RC_13', 'RC_21', 'RC_34', 'RC_55',
-    'Grad_5', 'Grad_10', 'Grad_20', 'RSI', 'BB_PctB', 'MACD_Hist', 'Vol_Ratio', 'ATR_Rel'
+    'Grad_5', 'Grad_10', 'Grad_20', 'RSI', 'BB_PctB', 'MACD_Hist', 'Vol_Ratio', 'ATR_Rel', 'Dist_Prev_K10'
 ]
-FEATS_FULL = FINAL_FEATURES + ['Dist_Prev_K10']
 
 # --- 2. XỬ LÝ DỮ LIỆU ---
-@st.cache_data(ttl=3600)
-def get_cached_data(symbol):
+@st.cache_data(ttl=600) # Lưu 10 phút để tránh bị chặn IP
+def fetch_stock_data(symbol):
     sources = ['VCI', 'SSI', 'DNSE']
-    df = None
     for src in sources:
         try:
-            # Giảm thời gian chờ để app mượt hơn
-            time.sleep(random.uniform(0.1, 0.3)) 
+            time.sleep(random.uniform(0.2, 0.5))
             stock = Vnstock().stock(symbol=symbol, source=src)
-            end_date = datetime.now().strftime('%Y-%m-%d')
-            start_date = (datetime.now() - timedelta(days=400)).strftime('%Y-%m-%d')
-            df = stock.quote.history(start=start_date, end=end_date)
+            df = stock.quote.history(start=(datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d'), 
+                                     end=datetime.now().strftime('%Y-%m-%d'))
             if df is not None and not df.empty:
-                return df, src # Trả về cả dữ liệu và nguồn để hiển thị
+                return df, src
         except:
             continue
     return pd.DataFrame(), None
 
-def add_indicators(df):
-    if len(df) < 60: return pd.DataFrame()
+def process_data(df):
     try:
-        g = df.copy()
-        g = g.rename(columns={'time': 'Date', 'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
-        g['Date'] = pd.to_datetime(g['Date'])
-        for c in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            g[c] = pd.to_numeric(g[c], errors='coerce')
-        g = g.sort_values('Date').reset_index(drop=True)
-
-        # AI Features
-        for n in [1, 2, 3, 5, 8, 13, 21, 34, 55]: 
-            g[f'RC_{n}'] = g['Close'].pct_change(n) * 100
-        for n in [5, 10, 20]: 
-            ma = g['Close'].rolling(n).mean()
-            g[f'Grad_{n}'] = np.gradient(ma.fillna(method='ffill').fillna(method='bfill'))
+        df = df.rename(columns={'time': 'Date', 'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+        df['Date'] = pd.to_datetime(df['Date'])
+        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = df.sort_values('Date').drop_duplicates().reset_index(drop=True)
         
-        # Indicators
-        g['SMA_20'] = ta.sma(g['Close'], length=20)
-        bb = ta.bbands(g['Close'], length=20, std=2)
-        g['BB_Upper'], g['BB_Lower'], g['BB_PctB'] = bb.iloc[:, 0], bb.iloc[:, 2], bb.iloc[:, 4]
-        g['RSI'] = ta.rsi(g['Close'], length=14)
-        g['MACD_Hist'] = ta.macd(g['Close']).iloc[:, 1]
-        g['Vol_Ratio'] = g['Volume'] / ta.sma(g['Volume'], length=20)
-        g['ATR_Rel'] = ta.atr(g['High'], g['Low'], g['Close'], length=14) / g['Close']
+        # Chỉ báo AI
+        for n in [1, 2, 3, 5, 8, 13, 21, 34, 55]: df[f'RC_{n}'] = df['Close'].pct_change(n) * 100
+        for n in [5, 10, 20]:
+            ma = df['Close'].rolling(n).mean()
+            df[f'Grad_{n}'] = np.gradient(ma.fillna(method='bfill').fillna(method='ffill'))
         
-        # K10 Logic
-        rmin, rmax, ma20 = g['Close'].rolling(20).min(), g['Close'].rolling(20).max(), g['Close'].rolling(20).mean()
-        g['Dist_Prev_K10'] = 0.0
-        g.loc[g['Close'] >= ma20, 'Dist_Prev_K10'] = (g['Close'] - rmin) / rmin
-        g.loc[g['Close'] < ma20, 'Dist_Prev_K10'] = (g['Close'] - rmax) / rmax
+        df['SMA_20'] = ta.sma(df['Close'], length=20)
+        bb = ta.bbands(df['Close'], length=20, std=2)
+        df['BB_Upper'], df['BB_Lower'], df['BB_PctB'] = bb.iloc[:, 0], bb.iloc[:, 2], bb.iloc[:, 4]
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['MACD_Hist'] = ta.macd(df['Close']).iloc[:, 1]
+        df['Vol_Ratio'] = df['Volume'] / ta.sma(df['Volume'], length=20)
+        df['ATR_Rel'] = ta.atr(df['High'], df['Low'], df['Close'], length=14) / df['Close']
         
-        return g.dropna().reset_index(drop=True)
+        # K10
+        rmin, rmax, ma20 = df['Close'].rolling(20).min(), df['Close'].rolling(20).max(), df['Close'].rolling(20).mean()
+        df['Dist_Prev_K10'] = 0.0
+        df.loc[df['Close'] >= ma20, 'Dist_Prev_K10'] = (df['Close'] - rmin) / rmin
+        df.loc[df['Close'] < ma20, 'Dist_Prev_K10'] = (df['Close'] - rmax) / rmax
+        
+        return df.dropna().reset_index(drop=True)
     except Exception as e:
-        st.error(f"Lỗi tính toán chỉ báo: {e}")
+        st.error(f"Lỗi tính toán: {e}")
         return pd.DataFrame()
 
 # --- 3. DỰ BÁO ---
-def predict_single(df_calc, symbol, idx):
-    if idx < 50 or idx >= len(df_calc): return None
+def run_ai_prediction(df, symbol, idx):
+    if idx < 50: return None
     try:
-        d50 = df_calc.iloc[idx-49:idx+1]
-        d10 = df_calc.iloc[idx-9:idx+1]
+        d50 = df.iloc[idx-49:idx+1][FEATS_FULL].values
+        d10 = df.iloc[idx-9:idx+1][FEATS_FULL[:17]].values # Model 10 ko có Dist_Prev_K10
         
-        scaler = local_scalers.get(symbol, global_scaler)
-        s50 = scaler.transform(d50[FEATS_FULL].values)
-        s10 = scaler.transform(d10[FEATS_FULL].values)
-
+        sc = local_scalers.get(symbol, global_scaler)
+        s50 = sc.transform(d50)
+        s10 = sc.transform(np.pad(d10, ((0,0),(0,1))))[:, :17] # Giữ đúng shape 17
+        
         p50 = model_win50.predict(np.expand_dims(s50, axis=0), verbose=0)[0]
-        p10 = model_win10.predict(np.expand_dims(s10[:,:17], axis=0), verbose=0)[0]
+        p10 = model_win10.predict(np.expand_dims(s10, axis=0), verbose=0)[0]
         
         c50, c10 = np.argmax(p50), np.argmax(p10)
-        sig = 1 
-        if c50 == 0 and c10 == 0: sig = 0 
-        elif c50 == 2 and c10 == 2: sig = 2 
+        sig = 0 if (c50 == 0 and c10 == 0) else (2 if (c50 == 2 and c10 == 2) else 1)
         return sig, (p50[c50] + p10[c10])/2
     except:
         return None
 
-# --- 4. BIỂU ĐỒ ---
-def plot_advanced_chart(df, ai_signals, k10_points):
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-    
-    # Nến giá
-    fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Giá'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_20'], line=dict(color='orange', width=1), name='MA20'), row=1, col=1)
-    
-    # K10
-    for pt in k10_points:
-        col = 'cyan' if pt['Type'] == 'Bottom' else 'yellow'
-        fig.add_trace(go.Scatter(x=[pt['Date']], y=[pt['Price']], mode='markers', marker=dict(symbol='circle-open', size=10, color=col, line=dict(width=2)), showlegend=False), row=1, col=1)
-
-    # Tín hiệu AI
-    for s in ai_signals:
-        sym, col = ('triangle-up', '#00FF00') if s['Signal'] == 0 else ('triangle-down', '#FF0000')
-        fig.add_trace(go.Scatter(x=[s['Date']], y=[s['Price']], mode='markers', marker=dict(symbol=sym, size=12, color=col), showlegend=False), row=1, col=1)
-
-    # RSI
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], line=dict(color='#AB63FA'), name='RSI'), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-
-    fig.update_layout(height=650, template='plotly_dark', xaxis_rangeslider_visible=False, margin=dict(t=30, b=10))
-    return fig
-
-# --- 5. MAIN ---
+# --- 4. GIAO DIỆN ---
 VN30 = ['ACB', 'BCM', 'BID', 'CTG', 'DGC', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'LPB', 'MSN', 'MBB', 'MWG', 'PLX', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VIC', 'VHM', 'VIB', 'VJC', 'VNM', 'VPB', 'VRE']
 
 st.sidebar.title("🤖 VN30 AI PRO")
-mode = st.sidebar.selectbox("Chế độ", ["Quét VN30", "Chi tiết mã"])
+if st.sidebar.button("🔄 Làm mới dữ liệu (Clear Cache)"):
+    st.cache_data.clear()
+    st.sidebar.success("Đã xóa bộ nhớ đệm!")
 
-if mode == "Quét VN30":
-    st.title("🚀 Tín hiệu AI Real-time")
-    if st.button("Bắt đầu quét"):
+mode = st.sidebar.selectbox("Chế độ", ["Quét Toàn VN30", "Chi tiết mã"])
+
+if mode == "Quét Toàn VN30":
+    st.title("🚀 Tín hiệu Real-time")
+    if st.button("Bắt đầu quét thị trường"):
         results = []
         pbar = st.progress(0)
         for i, sym in enumerate(VN30):
-            df_raw, _ = get_cached_data(sym)
+            df_raw, _ = fetch_stock_data(sym)
             if not df_raw.empty:
-                df_c = add_indicators(df_raw)
-                if not df_c.empty:
-                    res = predict_single(df_c, sym, len(df_c)-1)
+                df_p = process_data(df_raw)
+                if not df_p.empty:
+                    res = run_ai_prediction(df_p, sym, len(df_p)-1)
                     if res:
-                        results.append({'Mã': sym, 'Giá': df_c.iloc[-1]['Close'], 'AI': res[0], 'Prob': res[1]})
+                        results.append({'Mã': sym, 'Giá': df_p.iloc[-1]['Close'], 'AI': res[0], 'Prob': res[1]})
             pbar.progress((i+1)/len(VN30))
         
         if results:
             res_df = pd.DataFrame(results)
             res_df['Tín hiệu'] = res_df['AI'].map({0: 'MUA 🟢', 1: 'Hold 🟡', 2: 'BÁN 🔴'})
-            st.success("Đã quét xong VN30!")
-            st.dataframe(res_df[['Mã', 'Giá', 'Tín hiệu', 'Prob']].sort_values('AI').style.format({'Giá': '{:,.0f}', 'Prob': '{:.1%}'}))
+            st.dataframe(res_df[['Mã', 'Giá', 'Tín hiệu', 'Prob']].sort_values('AI'))
 
 else:
     symbol = st.sidebar.selectbox("Chọn mã", VN30)
-    lookback = st.sidebar.slider("Số phiên xem lại", 50, 200, 100)
+    lookback = st.sidebar.slider("Xem lại (phiên)", 50, 200, 100)
     
-    if st.button(f"Phân tích chuyên sâu {symbol}"):
-        with st.status(f"Đang xử lý {symbol}...", expanded=True) as status:
-            st.write("Đang tải dữ liệu từ máy chủ...")
-            df_raw, source = get_cached_data(symbol)
-            
+    if st.button(f"Phân tích {symbol}"):
+        with st.status(f"Đang xử lý dữ liệu {symbol}...") as status:
+            df_raw, source = fetch_stock_data(symbol)
             if not df_raw.empty:
-                st.write(f"Đã lấy dữ liệu thành công từ nguồn {source}.")
-                df_c = add_indicators(df_raw)
+                st.write(f"✅ Đã lấy dữ liệu từ nguồn: **{source}**")
+                df_p = process_data(df_raw)
                 
-                if not df_c.empty:
-                    st.write("Đang chạy mô hình AI & Backtest...")
-                    # Dự báo hiện tại
-                    curr_res = predict_single(df_c, symbol, len(df_c)-1)
+                if not df_p.empty:
+                    st.write("🧠 Đang tính toán tín hiệu AI...")
+                    # 1. Dự báo hiện tại
+                    curr = run_ai_prediction(df_p, symbol, len(df_p)-1)
                     
-                    # Hiển thị kết quả AI
-                    if curr_res:
-                        status.update(label=f"Hoàn tất phân tích {symbol}!", state="complete")
+                    if curr:
                         c1, c2, c3 = st.columns(3)
-                        with c1: st.metric("Giá hiện tại", f"{df_c.iloc[-1]['Close']:,.0f}")
-                        with c2: 
-                            txt = {0: 'MUA 🟢', 1: 'THEO DÕI 🟡', 2: 'BÁN 🔴'}[curr_res[0]]
-                            st.subheader(f"Kết luận: {txt}")
-                        with c3: st.metric("Xác suất AI", f"{curr_res[1]:.1%}")
-                    
-                    # Tính toán biểu đồ
-                    ai_sigs, k10s = [], []
-                    start_idx = max(0, len(df_c) - lookback)
-                    for i in range(start_idx, len(df_c)):
-                        r = predict_single(df_c, symbol, i)
-                        if r and r[0] != 1:
-                            ai_sigs.append({'Date': df_c.iloc[i]['Date'], 'Price': df_c.iloc[i]['Close'], 'Signal': r[0]})
+                        c1.metric("Giá hiện tại", f"{df_p.iloc[-1]['Close']:,.0f}")
+                        c2.subheader(f"Dự báo: {['MUA 🟢', 'THEO DÕI 🟡', 'BÁN 🔴'][curr[0]]}")
+                        c3.metric("Xác suất", f"{curr[1]:.1%}")
+
+                        # 2. Backtest để vẽ lên biểu đồ
+                        ai_sigs, k10s = [], []
+                        for i in range(len(df_p)-lookback, len(df_p)):
+                            r = run_ai_prediction(df_p, symbol, i)
+                            if r and r[0] != 1:
+                                ai_sigs.append({'Date': df_p.iloc[i]['Date'], 'Price': df_p.iloc[i]['Close'], 'Signal': r[0]})
+                            
+                            if i < len(df_p)-5:
+                                win = df_p.iloc[i-10:i+11]['Close']
+                                if df_p.iloc[i]['Close'] == win.min(): k10s.append({'Date': df_p.iloc[i]['Date'], 'Price': df_p.iloc[i]['Close'], 'Type': 'Bottom'})
+                                if df_p.iloc[i]['Close'] == win.max(): k10s.append({'Date': df_p.iloc[i]['Date'], 'Price': df_p.iloc[i]['Close'], 'Type': 'Top'})
                         
-                        if i >= 10 and i < len(df_c) - 5:
-                            win = df_c.iloc[i-10:i+11]['Close']
-                            if df_c.iloc[i]['Close'] == win.min(): k10s.append({'Type': 'Bottom', 'Date': df_c.iloc[i]['Date'], 'Price': df_c.iloc[i]['Close']})
-                            if df_c.iloc[i]['Close'] == win.max(): k10s.append({'Type': 'Top', 'Date': df_c.iloc[i]['Date'], 'Price': df_c.iloc[i]['Close']})
-                    
-                    st.plotly_chart(plot_advanced_chart(df_c.tail(lookback+20), ai_sigs, k10s), use_container_width=True)
+                        # 3. Vẽ biểu đồ
+                        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+                        fig.add_trace(go.Candlestick(x=df_p.tail(lookback)['Date'], open=df_p.tail(lookback)['Open'], high=df_p.tail(lookback)['High'], low=df_p.tail(lookback)['Low'], close=df_p.tail(lookback)['Close'], name='Giá'), row=1, col=1)
+                        
+                        for s in ai_sigs:
+                            fig.add_trace(go.Scatter(x=[s['Date']], y=[s['Price']], mode='markers', marker=dict(symbol='triangle-up' if s['Signal']==0 else 'triangle-down', size=12, color='#00FF00' if s['Signal']==0 else '#FF0000'), showlegend=False), row=1, col=1)
+                        
+                        fig.update_layout(height=600, template='plotly_dark', xaxis_rangeslider_visible=False)
+                        st.plotly_chart(fig, use_container_width=True)
+                        status.update(label="Hoàn tất!", state="complete")
                 else:
-                    status.update(label="Lỗi: Dữ liệu không đủ để tính toán chỉ báo.", state="error")
+                    st.error("Dữ liệu lỗi sau khi xử lý.")
             else:
-                status.update(label="Lỗi: Không thể tải dữ liệu từ server.", state="error")
+                st.error("Không thể kết nối đến server chứng khoán. Thử nhấn 'Làm mới dữ liệu' ở cột trái.")
