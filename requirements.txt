@@ -1,0 +1,8 @@
+streamlit
+tensorflow
+pandas
+numpy
+pandas_ta
+vnstock
+joblib
+scikit-learn
