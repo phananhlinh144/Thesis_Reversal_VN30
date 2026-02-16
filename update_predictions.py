@@ -7,7 +7,8 @@ import warnings
 import os
 import gspread
 from datetime import datetime
-from vnstock import * warnings.filterwarnings('ignore')
+from vnstock import *
+warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # --- 1. CẤU HÌNH ---
@@ -169,3 +170,4 @@ if __name__ == "__main__":
         time.sleep(1.0) 
     if final_output:
         push_to_sheets(final_output)
+
