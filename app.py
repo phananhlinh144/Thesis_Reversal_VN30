@@ -137,7 +137,6 @@ if 'all_results' not in st.session_state:
         st.session_state.all_results = pd.DataFrame(results, columns=["Mã", "Giá HT", "win50", "win10", "ENSEMBLE"])
         status.update(label="✅ Đã quét xong!", state="complete", expanded=False)
 
-# --- 4. GIAO DIỆN TABS (Giữ nguyên phần hiển thị của bạn) ---
 # --- 4. GIAO DIỆN TABS ---
 t1, t2, t3 = st.tabs(["🚀 Tổng hợp VN30", "📊 Đồ thị AI", "🔍 Chi tiết 20 phiên"])
 
@@ -145,17 +144,20 @@ t1, t2, t3 = st.tabs(["🚀 Tổng hợp VN30", "📊 Đồ thị AI", "🔍 Chi
 with t1:
     df_res = st.session_state.all_results
     if df_res.empty:
-        st.warning("⚠️ Không lấy được dữ liệu. Kiểm tra nguồn DNSE hoặc nhấn Làm mới.")
-        st.error("⚠️ DNSE vẫn chặn hoặc không có dữ liệu. Hãy thử lại sau vài phút.")
+        st.warning("⚠️ Không lấy được dữ liệu. Kiểm tra nguồn VCI hoặc nhấn Làm mới.")
     else:
         c1, c2, c3 = st.columns(3)
         with c1: 
-@@ -143,43 +136,40 @@ def predict_logic(df_c, symbol, target_idx=-1):
+            st.success("🟢 PHÂN KHÚC MUA")
+            st.dataframe(df_res[df_res['ENSEMBLE'] == "MUA"], use_container_width=True, hide_index=True)
+        with c2: 
+            st.error("🔴 PHÂN KHÚC BÁN")
+            st.dataframe(df_res[df_res['ENSEMBLE'] == "BÁN"], use_container_width=True, hide_index=True)
+        with c3: 
             st.warning("🟡 THEO DÕI")
             st.dataframe(df_res[~df_res['ENSEMBLE'].isin(["MUA", "BÁN"])], use_container_width=True, hide_index=True)
-
+    
     if st.button("🔄 Làm mới dữ liệu (Quét lại toàn bộ)"):
-    if st.button("🔄 Quét lại toàn bộ (Nghỉ 1.7s/mã)"):
         del st.session_state.all_results
         st.rerun()
 
@@ -182,23 +184,6 @@ with t2:
         
         fig.update_layout(height=600, template='plotly_dark', xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
-    if not df_plot.empty:
-        df_c_plot = compute_features(df_plot)
-        if not df_c_plot.empty:
-            chart_df = df_c_plot.tail(100).copy()
-            signals = [predict_logic(df_c_plot, sel_sym, target_idx=i) for i in range(len(df_c_plot)-50, len(df_c_plot))]
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3], specs=[[{"secondary_y": True}], [{"secondary_y": False}]])
-            fig.add_trace(go.Candlestick(x=chart_df['Date'], open=chart_df['Open'], high=chart_df['High'], low=chart_df['Low'], close=chart_df['Close'], name="Giá"), row=1, col=1)
-            
-            sig_dates, sig_prices = chart_df['Date'].tail(50), chart_df['Close'].tail(50)
-            for i, s in enumerate(signals):
-                if s and s['ENSEMBLE'] == "MUA":
-                    fig.add_trace(go.Scatter(x=[sig_dates.iloc[i]], y=[sig_prices.iloc[i]*0.985], mode="markers", marker=dict(symbol="triangle-up", size=10, color="white", line=dict(width=1, color="black")), showlegend=False), row=1, col=1)
-                elif s and s['ENSEMBLE'] == "BÁN":
-                    fig.add_trace(go.Scatter(x=[sig_dates.iloc[i]], y=[sig_prices.iloc[i]*1.015], mode="markers", marker=dict(symbol="triangle-down", size=10, color="black", line=dict(width=1, color="white")), showlegend=False), row=1, col=1)
-            
-            fig.update_layout(height=600, template='plotly_dark', xaxis_rangeslider_visible=False)
-            st.plotly_chart(fig, use_container_width=True)
 
 # TAB 3: LỊCH SỬ
 with t3:
@@ -212,14 +197,3 @@ with t3:
             if r:
                 hist_data.append({"Ngày": df_hc['Date'].iloc[i].strftime('%d/%m/%Y'), "Giá": f"{df_hc['Close'].iloc[i]:,.0f}", "win50": r['win50'], "win10": r['win10'], "ENSEMBLE": r['ENSEMBLE']})
         st.table(pd.DataFrame(hist_data[::-1]))
-    if not df_h.empty:
-        df_hc = compute_features(df_h)
-        if not df_hc.empty:
-            hist_data = []
-            for i in range(len(df_hc)-20, len(df_hc)):
-                r = predict_logic(df_hc, sel_sym_h, target_idx=i)
-                if r:
-                    hist_data.append({"Ngày": df_hc['Date'].iloc[i].strftime('%d/%m/%Y'), "Giá": f"{df_hc['Close'].iloc[i]:,.0f}", "win50": r['win50'], "win10": r['win10'], "ENSEMBLE": r['ENSEMBLE']})
-            st.table(pd.DataFrame(hist_data[::-1]))
-
-
