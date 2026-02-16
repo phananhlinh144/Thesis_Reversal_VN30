@@ -100,7 +100,12 @@ def compute_features(df):
     g['RSI'] = ta.rsi(g['Close'], length=14)
     
     bb = ta.bbands(g['Close'], length=20, std=2)
-    g['BB_PctB'] = bb.iloc[:, 4] # Cột %B
+    # Tìm cột có tên chứa 'B' (thường là BBP_20_2.0)
+    pctb_col = [c for c in bb.columns if c.startswith('BBP')]
+    if pctb_col:
+        g['BB_PctB'] = bb[pctb_col[0]]
+    else:
+        g['BB_PctB'] = bb.iloc[:, 4] # Quay lại cách cũ nếu không tìm thấy
     
     g['MACD_Hist'] = ta.macd(g['Close']).iloc[:, 1]
     g['ATR_Rel'] = ta.atr(g['High'], g['Low'], g['Close'], length=14) / g['Close']
@@ -182,4 +187,5 @@ if __name__ == "__main__":
     if final_output:
         pd.DataFrame(final_output).to_csv('vn30_signals.csv', index=False, encoding='utf-8-sig')
         print(f"\n✅ Hệ thống đã cập nhật vn30_signals.csv thành công!")
+
 
