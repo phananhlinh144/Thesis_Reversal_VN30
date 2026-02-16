@@ -51,20 +51,26 @@ def compute_features(df):
     g = g.ffill().bfill()
     for n in [1, 2, 3, 5, 8, 13, 21, 34, 55]: 
         g[f'RC_{n}'] = g['Close'].pct_change(n) * 100
+        
     for n in [5, 10, 20]:
         ma = g['Close'].rolling(window=n).mean().bfill()
         g[f'Grad_{n}'] = np.gradient(ma)
+        
     g['Vol_Ratio'] = g['Volume'] / g['Volume'].rolling(20).mean()
+    
     g['RSI'] = compute_rsi(g['Close'], 14)
     ma20 = g['Close'].rolling(20).mean()
     std20 = g['Close'].rolling(20).std()
     g['BB_PctB'] = (g['Close'] - (ma20 - 2*std20)) / ((ma20 + 2*std20) - (ma20 - 2*std20))
+    
     exp12 = g['Close'].ewm(span=12, adjust=False).mean()
     exp26 = g['Close'].ewm(span=26, adjust=False).mean()
     macd = exp12 - exp26
     g['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
+    
     tr = pd.concat([g['High']-g['Low'], abs(g['High']-g['Close'].shift()), abs(g['Low']-g['Close'].shift())], axis=1).max(axis=1)
     g['ATR_Rel'] = tr.rolling(14).mean() / g['Close']
+    
     g['Dist_Prev_K10'] = 0.0
     g.loc[g['Close'] >= ma20, 'Dist_Prev_K10'] = (g['Close'] - g['Close'].rolling(20).min()) / g['Close'].rolling(20).min()
     g.loc[g['Close'] < ma20, 'Dist_Prev_K10'] = (g['Close'] - g['Close'].rolling(20).max()) / g['Close'].rolling(20).max()
@@ -73,6 +79,8 @@ def compute_features(df):
 def get_hybrid_data(symbol):
     try:
         full_hist = pd.read_csv(HISTORY_CSV_PATH)
+        # Ép kiểu Date ngay lập tức
+        full_hist['Date'] = pd.to_datetime(full_hist['Date']) 
         df_old = full_hist[full_hist['Symbol'] == symbol].sort_values('Date')
         df_new = stock_historical_data(symbol=symbol, start_date="2026-01-11", end_date=datetime.now().strftime('%Y-%m-%d'), resolution='1D', type='stock', source='VCI')
         if df_new is not None and not df_new.empty:
@@ -107,3 +115,5 @@ if __name__ == "__main__":
     if final_output:
         pd.DataFrame(final_output).to_csv(OUTPUT_CSV_PATH, index=False, encoding='utf-8-sig')
         print(f"✅ Đã tạo file {OUTPUT_CSV_PATH}")
+        print(f"📊 Đã dự báo xong. Tổng số dòng kết quả: {len(final_output)}")
+
