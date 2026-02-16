@@ -23,7 +23,7 @@ jobs:
 
       - name: Install libraries
         run: |
-          pip install pandas vnstock beautifulsoup4 lxml requests
+          pip install pandas vnstock
 
       - name: Run Update Script
         # Đổi tên file ở đây cho khớp với file python lấy data
