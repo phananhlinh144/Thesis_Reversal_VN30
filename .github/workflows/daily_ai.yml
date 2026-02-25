@@ -3,7 +3,7 @@ name: Auto Update Data CSV
 on:
   schedule:
     # Chạy lúc 15:45 chiều VN (tương ứng 8:45 AM UTC) mỗi ngày từ thứ 2 đến thứ 6
-    - cron: '45 8 * * 1-5'
+    - cron: '15 8 * * 1-5'
   workflow_dispatch: # Vẫn giữ cái này để khi nào thích thì bấm tay chạy thử
 
 jobs:
