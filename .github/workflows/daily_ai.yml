@@ -3,7 +3,7 @@ name: Auto Update Data CSV
 on:
   schedule:
     # Chạy lúc 15:45 chiều VN (tương ứng 8:45 AM UTC) mỗi ngày từ thứ 2 đến thứ 6
-    - cron: '15 8 * * 1-5'
+    - cron: '00 8 * * 1-5'
   workflow_dispatch: # Vẫn giữ cái này để khi nào thích thì bấm tay chạy thử
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
           git config --global user.name "Data-Bot"
           git config --global user.email "bot@github.com"
           
-          # Bây giờ mình lưu file raw vì AI sẽ chạy ở app.py
+          # lưu file raw vì AI sẽ chạy ở app.py
           if [ -f "vn30_data_raw.csv" ]; then
             git add vn30_data_raw.csv
             git commit -m "Auto-update VN30 data $(date)" || echo "No changes to commit"
