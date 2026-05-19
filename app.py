@@ -135,41 +135,6 @@ def get_data_for_symbol(symbol, fetch_live=True):
             df_hist = df_hist.sort_values('Date')
         except:
             df_hist = pd.DataFrame(columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Symbol'])
-
-        if not fetch_live:
-            return df_hist
-
-        try:
-            stock = Vnstock().stock(symbol=symbol, source='VCI')
-            live_df = stock.quote.now()
-            
-            if not live_df.empty:
-                cur_close = float(live_df['close'].iloc[0])
-                cur_vol = float(live_df['volume'].iloc[0])
-                cur_high = float(live_df['high'].iloc[0])
-                cur_low = float(live_df['low'].iloc[0])
-                
-                if cur_high == 0: cur_high = cur_close
-                if cur_low == 0: cur_low = cur_close
-                
-                today = pd.Timestamp(datetime.now().date())
-                
-                if df_hist.empty or df_hist.iloc[-1]['Date'].date() < today.date():
-                    new_row = pd.DataFrame([{
-                        'Date': today, 'Open': cur_close, 'High': cur_high,
-                        'Low': cur_low, 'Close': cur_close, 'Volume': cur_vol, 'Symbol': symbol
-                    }])
-                    df_hist = pd.concat([df_hist, new_row], ignore_index=True)
-                else:
-                    idx = df_hist.index[-1]
-                    df_hist.at[idx, 'Close'] = cur_close
-                    df_hist.at[idx, 'High'] = max(df_hist.at[idx, 'High'], cur_high)
-                    df_hist.at[idx, 'Low'] = min(df_hist.at[idx, 'Low'], cur_low)
-                    df_hist.at[idx, 'Volume'] = cur_vol
-                    
-        except Exception:
-            pass
-            
         return df_hist.reset_index(drop=True)
     except Exception:
         return pd.DataFrame()
